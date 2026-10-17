@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#17614a">
+<title>Manifest Check</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <h1>Manifest Check</h1>
+  <span class="pill" id="sync">…</span>
+  <button id="menu" hidden>Sign out</button>
+</header>
+<main id="app"><div class="empty">Loading…</div></main>
+<script type="module">
+import { DEMO, h, swap, normalizeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, RESULT, plural, friendlyError,
+  runTitle, manifestNos, crewNames, firstName, driverIdsOf } from "./shared.js";
+import { createStore } from "./store.js";
+import { scanMany, signal } from "./barcode-scanner.js";
+
+const root = document.getElementById("app"), $ = id => document.getElementById(id);
+// Formats Metrc tags and company labels are printed in. QR codes are read even if they hold a URL around the tag.
+const FORMATS = ["code_128", "qr_code", "data_matrix", "code_39", "pdf417"];
+const S = { store: null, user: undefined, profile: undefined, manifests: [], error: "",
+  mid: null, manifest: undefined, scans: [], pending: 0, local: new Map(), last: null, code: "", unsub: {} };
+
+/* ---------------- start up ---------------- */
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+(async () => {
+  try { S.store = await createStore("driver"); }
+  catch (e) { swap(root, h("div", { class: "card empty" }, "Couldn't start the app. Connect to the internet once and reload — after that it works offline.")); return; }
+  S.store.onUser(u => {
+    Object.values(S.unsub).forEach(f => f && f()); S.unsub = {}; S.mid = null;
+    S.user = u || null; S.profile = undefined; S.manifests = [];
+    if (u) {
+      S.unsub.profile = S.store.watchProfile(u.uid, p => { S.profile = p; render(); }, onErr);
+      S.unsub.list = S.store.watchMyManifests(u.uid, l => { S.manifests = l; render(); }, onErr);
+      followRoute();
+    }
+    render();
+  });
+  addEventListener("hashchange", () => { followRoute(); render(); scrollTo(0, 0); });
+  addEventListener("online", render); addEventListener("offline", render);
+  $("menu").onclick = async () => {
+    if (S.store.demo) { if (confirm("Reset the demo data?")) { S.store.reset(); location.hash = ""; } return; }
+    if (S.pending && !confirm(`${plural(S.pending, "scan")} haven't uploaded yet. If you sign out now they may be lost. Sign out anyway?`)) return;
+    await S.store.signOut(); location.hash = "";
+  };
+})();
+function onErr(e) { console.warn(e); S.error = friendlyError(e); render(); }
+
+function route() {
+  const m = location.hash.match(/^#\/m\/([^/]+)(?:\/s\/([^/]+))?/);
+  return m ? { mid: decodeURIComponent(m[1]), sid: m[2] ? decodeURIComponent(m[2]) : null } : {};
+}
+function followRoute() {
+  const { mid } = route();
+  if ((mid || null) === S.mid) return;
+  S.unsub.m && S.unsub.m(); S.unsub.sc && S.unsub.sc();
+  Object.assign(S, { mid: mid || null, manifest: undefined, scans: [], pending: 0, local: new Map(), last: null });
+  if (!mid || !S.user) return;
+  S.unsub.m = S.store.watchManifest(mid, m => { S.manifest = m; render(); }, onErr);
+  S.unsub.sc = S.store.watchScans(mid, (l, p) => { S.scans = l; S.pending = p; render(); }, onErr);
+}
+
+/* ---------------- render ---------------- */
+function render() {
+  const sync = $("sync");
+  if (!navigator.onLine) { sync.className = "pill off"; sync.textContent = S.pending ? `Offline · ${S.pending} saved on phone` : "Offline"; }
+  else { sync.className = "pill"; sync.textContent = S.pending ? `Uploading ${S.pending}…` : DEMO ? "Demo" : "Online"; }
+  $("menu").hidden = !S.user;
+  $("menu").textContent = S.store && S.store.demo ? "Reset demo" : "Sign out";
+  if (S.user === undefined) return;
+  if (!S.user) return swap(root, loginView());
+  swap(root, h("div", null,
+    S.store.demo ? h("div", { class: "banner" }, "Demo mode: data stays on this device. Tap a package to pretend-scan it. ",
+      h("label", null, "Viewing as ", h("select", { style: { width: "auto", minHeight: "32px", fontSize: "14px" }, onchange: e => S.store.actAs(e.target.value) },
+        S.store.demoDrivers().map(d => h("option", { value: d.id, selected: d.id === S.store.me() }, d.name + (d.truck ? ` (${d.truck})` : "")))))) : null,
+    S.error ? h("div", { class: "banner bad" }, S.error, h("button", { class: "small", onclick: () => { S.error = ""; render(); } }, "OK")) : null,
+    S.profile && S.profile.active === false ? h("div", { class: "card empty" }, "Your account is turned off. Ask the office.") : body()));
+}
+function body() {
+  const r = route();
+  if (!r.mid) return listView();
+  if (S.manifest === undefined) return h("div", { class: "empty" }, "Loading…");
+  if (S.manifest === null) return h("div", null, h("a", { class: "back", href: "#/" }, "← All runs"),
+    h("div", { class: "card empty" }, "This run isn't on this phone. Connect to the internet and open it again."));
+  const stop = r.sid && (S.manifest.stops || []).find(s => s.id === r.sid);
+  return stop ? stopView(stop) : manifestView();
+}
+
+/* ---------------- sign in ---------------- */
+function loginView() {
+  let msg = h("div", { class: "err" });
+  const email = h("input", { type: "email", autocomplete: "username", placeholder: "Email", "data-k": "email" });
+  const pw = h("input", { type: "password", autocomplete: "current-password", placeholder: "Password", "data-k": "pw" });
+  return h("form", { class: "card login", onsubmit: async e => {
+      e.preventDefault(); msg.textContent = "Signing in…";
+      try { await S.store.signIn(email.value, pw.value); } catch (err) { msg.textContent = friendlyError(err); }
+    } },
+    h("h2", { class: "title" }, "Driver sign in"),
+    email, pw, h("button", { class: "primary big" }, "Sign in"), msg,
+    h("button", { type: "button", class: "ghost small", onclick: async () => {
+      if (!email.value) { msg.textContent = "Type your email first."; return; }
+      try { await S.store.resetPassword(email.value); msg.textContent = "Check your email for a reset link."; } catch (err) { msg.textContent = friendlyError(err); }
+    } }, "Forgot password?"),
+    h("div", { class: "hint" }, "Sign in once while you have internet. After that the app and your manifests work offline."));
+}
+
+/* ---------------- manifest list ---------------- */
+function listView() {
+  const ms = S.manifests.filter(m => m.status !== "archived")
+    .sort((a, b) => (a.status === "done") - (b.status === "done") || String(b.date || "").localeCompare(String(a.date || "")) || (b.createdAt || 0) - (a.createdAt || 0));
+  return h("div", null,
+    h("h2", { class: "title" }, S.profile && S.profile.name ? `Hi ${firstName(S.profile.name)}${S.profile.truck ? ` · ${S.profile.truck}` : ""}` : "Your runs"),
+    ms.length ? ms.map(m => {
+      const stops = (m.stops || []).length, done = (m.stops || []).filter(s => stopIsDone(m, s.id)).length;
+      return h("a", { class: "card", href: `#/m/${encodeURIComponent(m.id)}` },
+        h("div", { class: "rb" }, h("b", { style: { fontSize: "18px" } }, runTitle(m)),
+          m.status === "done" ? h("span", { class: "chip ok" }, "Done") : done ? h("span", { class: "chip warn" }, "In progress") : h("span", { class: "chip" }, "New")),
+        h("div", { class: "meta" }, [plural(stops, "stop"), plural(packageCount(m), "package"), driverIdsOf(m).length > 1 && crewNames(m)].filter(Boolean).join(" · ")),
+        manifestNos(m).length ? h("div", { class: "meta" }, `Manifest${manifestNos(m).length > 1 ? "s" : ""} ${manifestNos(m).join(", ")}`) : null,
+        h("div", { class: "bar" }, h("i", { style: { width: `${stops ? (done / stops) * 100 : 0}%` } })),
+        h("div", { class: "meta", style: { marginTop: "6px" } }, `${done} of ${stops} stops finished`));
+    }) : h("div", { class: "card empty" }, "Nothing assigned yet. Runs show up here when the office sends them. Open the app while you have internet to download them."));
+}
+
+/* ---------------- one manifest: its stops ---------------- */
+function manifestView() {
+  const m = S.manifest, sum = withLocal(summarize(m, S.scans));
+  return h("div", null,
+    h("a", { class: "back", href: "#/" }, "← All runs"),
+    h("div", { class: "card" },
+      h("div", { class: "rb" }, h("b", { style: { fontSize: "18px" } }, runTitle(m)), driverIdsOf(m).length > 1 ? h("span", { class: "meta" }, crewNames(m)) : null),
+      h("div", { class: "meta" }, `${sum.done} of ${plural(sum.total, "package")} scanned`),
+      h("div", { class: "bar" }, h("i", { style: { width: `${sum.total ? (sum.done / sum.total) * 100 : 0}%` } })),
+      S.pending ? h("div", { class: "hint" }, `${plural(S.pending, "scan")} waiting to upload. They'll send by themselves when you're back online.`) : null),
+    (m.stops || []).map((s, i) => {
+      const p = sum.per[s.id], n = s.packages.length, got = p.matched.size, done = stopIsDone(m, s.id), issues = uniqIssues(p.issues).length;
+      return h("a", { class: "card" + (done ? " stop-done" : ""), href: `#/m/${encodeURIComponent(m.id)}/s/${encodeURIComponent(s.id)}` },
+        h("div", { style: { display: "flex", gap: "12px", alignItems: "center" } },
+          h("div", { class: "stopno" }, done ? "✓" : String(i + 1)),
+          h("div", { style: { flex: 1, minWidth: 0 } },
+            h("div", { class: "rb" }, h("b", null, s.name), done ? h("span", { class: "chip ok" }, "Finished") : null),
+            h("div", { class: "meta" }, s.address || s.license),
+            s.manifestNo ? h("div", { class: "meta" }, `Manifest ${s.manifestNo}${s.invoiceNo ? ` · WTI ${s.invoiceNo}` : ""}`) : null,
+            h("div", { class: "meta" }, `${got} of ${n} scanned`, issues ? h("span", { class: "chip bad", style: { marginLeft: "8px" } }, plural(issues, "problem")) : null))),
+        h("div", { class: "bar" }, h("i", { style: { width: `${n ? (got / n) * 100 : 0}%` } })));
+    }));
+}
+
+/* ---------------- one stop: scanning ---------------- */
+function stopView(stop) {
+  const m = S.manifest, sum = withLocal(summarize(m, S.scans)), per = sum.per[stop.id];
+  const idx = m.stops.indexOf(stop), done = stopIsDone(m, stop.id);
+  const scanned = stop.packages.filter(p => per.matched.has(p.tag)), todo = stop.packages.filter(p => !per.matched.has(p.tag));
+  const issues = uniqIssues(per.issues);
+  const crew = driverIdsOf(m).length > 1;
+  const row = (p, ok) => {
+    const sc = ok && per.matched.get(p.tag);
+    return h("div", { class: "pkg" + (ok ? " done" : "") + (S.store.demo && !ok ? " tapme" : ""), onclick: S.store.demo && !ok ? () => handleCode(p.tag, stop.id, "tap") : null },
+      h("div", { class: "ic" }, ok ? "✓" : p.box || ""),
+      h("div", { class: "main" },
+        h("div", { class: "name" }, p.item || "(no item name)"),
+        h("div", { class: "meta" }, [p.box && `Box ${p.box}`, fmtQty(p), p.batch && `Batch ${p.batch}`].filter(Boolean).join(" · ")),
+        tagNode(p.tag),
+        sc && sc.at ? h("div", { class: "meta" }, `Scanned ${fmtTime(sc.at)}${crew && sc.driverName ? ` by ${firstName(sc.driverName)}` : ""}`) : null));
+  };
+  return h("div", null,
+    h("a", { class: "back", href: `#/m/${encodeURIComponent(m.id)}` }, `← ${runTitle(m)}`),
+    h("div", { class: "card" },
+      h("div", { class: "meta" }, `Stop ${idx + 1} of ${m.stops.length}`),
+      h("div", { style: { fontSize: "20px", fontWeight: 800 } }, stop.name),
+      h("div", { class: "meta" }, [stop.address, stop.license].filter(Boolean).join(" · ")),
+      stop.manifestNo ? h("div", { class: "meta" }, `Manifest ${stop.manifestNo}${stop.invoiceNo ? ` · WTI ${stop.invoiceNo}` : ""}`) : null,
+      h("div", { class: "rb", style: { marginTop: "8px" } }, h("b", null, `${scanned.length} of ${stop.packages.length} scanned`), done ? h("span", { class: "chip ok" }, "Finished") : null),
+      h("div", { class: "bar" }, h("i", { style: { width: `${stop.packages.length ? (scanned.length / stop.packages.length) * 100 : 0}%` } })),
+      h("div", { style: { marginTop: "14px" } }, h("button", { class: "primary big", onclick: () => openCamera(stop) }, "📷  Scan packages")),
+      h("form", { class: "manual", onsubmit: e => { e.preventDefault(); if (S.code.trim()) { handleCode(S.code, stop.id, "typed"); S.code = ""; render(); } } },
+        h("input", { "data-k": "code", value: S.code, oninput: e => { S.code = e.target.value; }, placeholder: "Type a tag", autocomplete: "off", autocapitalize: "characters", spellcheck: "false", enterkeyhint: "go" }),
+        h("button", null, "Check")),
+      h("div", { class: "hint" }, "Bluetooth scanner: just scan — it works whenever this screen is open.")),
+    S.last && S.last.stopId === stop.id ? resultCard(S.last) : null,
+    issues.length ? h("div", { class: "card" }, h("h3", { style: { marginTop: 0 } }, `Problems at this stop (${issues.length})`),
+      issues.map(sc => h("div", { class: "pkg issue" }, h("div", { class: "ic" }, "!"),
+        h("div", { class: "main" }, h("div", { class: "name" }, sc.result === "wrong_stop" ? `Belongs to ${stopLabel(sc.otherStopId)}` : "Not on this manifest"),
+          infoFor(sc.tag) ? h("div", { class: "meta" }, infoFor(sc.tag).item) : null, tagNode(sc.tag))))) : null,
+    h("h3", null, `To scan (${todo.length})`),
+    h("div", { class: "card" }, todo.length ? todo.map(p => row(p, false)) : h("div", { class: "empty" }, "Everything at this stop is scanned. 🎉")),
+    scanned.length ? [h("h3", null, `Scanned (${scanned.length})`), h("div", { class: "card" }, scanned.map(p => row(p, true)))] : null,
+    h("div", { style: { margin: "6px 0 30px" } }, done
+      ? h("button", { class: "big", onclick: () => { S.store.setStopDone(m.id, stop.id, null, "in_progress"); } }, "Reopen this stop")
+      : h("button", { class: todo.length ? "big" : "primary big", onclick: () => finishStop(stop, todo) }, todo.length ? `Finish stop (${todo.length} not scanned)` : "✓ Finish this stop")));
+}
+
+function resultCard(r) {
+  const R = RESULT[r.result], p = r.pkg;
+  const sub = r.result === "wrong_stop" ? `This package is for ${stopLabel(r.otherStopId)}. Don't leave it here.`
+    : r.result === "not_on_manifest" ? "This tag isn't on this manifest. Don't leave it here."
+    : r.result === "duplicate" ? "This package was already counted." : "";
+  return h("div", { class: `result ${R.tone}`, role: "status", "aria-live": "polite" },
+    h("div", { class: "rb" }, h("div", { class: "rh" }, R.title), h("span", { class: "meta" }, fmtTime(r.at))),
+    sub ? h("div", { class: "rs" }, sub) : null,
+    p ? [h("div", { class: "ri" }, p.box ? h("span", { class: "boxchip" }, `Box ${p.box}`) : null, p.item || "(no item name)"),
+      h("div", { class: "rg" }, h("div", null, h("span", null, "Quantity / weight"), h("b", null, fmtQty(p) || "—")), h("div", null, h("span", null, "Batch"), h("b", null, p.batch || "—")))] : null,
+    tagNode(r.tag));
+}
+
+/* ---------------- checking a tag ---------------- */
+function handleCode(raw, stopId, via, fromCamera = false) {
+  const m = S.manifest; if (!m || !S.user) return null;
+  const tag = normalizeTag(raw); if (!tag) return null;
+  const sum = withLocal(summarize(m, S.scans)), hit = sum.byTag.get(tag);
+  let local = S.local.get(stopId); if (!local) S.local.set(stopId, local = new Set());
+  let result;
+  if (!hit) result = "not_on_manifest";
+  else if (hit.stop.id !== stopId) result = "wrong_stop";
+  else if (sum.per[stopId].matched.has(tag)) result = "duplicate";
+  else { result = "match"; local.add(tag); }
+  const scan = { tag, stopId, result, at: Date.now(), via, driverId: S.user.uid, driverName: (S.profile && S.profile.name) || S.user.email || "" };
+  if (result === "wrong_stop") scan.otherStopId = hit.stop.id;
+  if (String(raw).trim().toUpperCase() !== tag) scan.raw = String(raw).slice(0, 200);
+  S.store.addScan(m.id, scan);
+  S.last = { ...scan, pkg: hit && hit.pkg };
+  if (!fromCamera) signal(RESULT[result].tone);
+  render();
+  return S.last;
+}
+// Counts tags scanned on this phone that the database hasn't echoed back yet (prevents double counting fast scans).
+function withLocal(sum) {
+  for (const [sid, set] of S.local) { const p = sum.per[sid]; if (p) for (const t of set) if (!p.matched.has(t)) { p.matched.set(t, { tag: t }); sum.done++; } }
+  return sum;
+}
+const uniqIssues = list => [...new Map(list.map(s => [s.tag, s])).values()];
+const infoFor = tag => { const m = S.manifest; for (const s of (m && m.stops) || []) for (const p of s.packages) if (p.tag === tag) return p; return null; };
+function stopLabel(id) { const m = S.manifest, i = (m.stops || []).findIndex(s => s.id === id); return i < 0 ? "another stop" : `stop ${i + 1}: ${m.stops[i].name}`; }
+
+function openCamera(stop) {
+  const stopNo = S.manifest.stops.indexOf(stop) + 1;
+  scanMany({ title: `Stop ${stopNo}: ${stop.name}`, formats: FORMATS, manualNumeric: false, manualPlaceholder: "Or type the tag",
+    hint: "Point at each package's Metrc tag. It reads by itself.",
+    onDetect: hit => {
+      const r = handleCode(hit.code, stop.id, hit.source === "typed" ? "typed" : "camera", true);
+      if (!r) return null;
+      const R = RESULT[r.result], p = r.pkg;
+      const per = withLocal(summarize(S.manifest, S.scans)).per[stop.id];
+      return { tone: R.tone,
+        title: r.result === "wrong_stop" ? `${R.title} — ${stopLabel(r.otherStopId)}` : `${R.title}  (${per.matched.size}/${stop.packages.length})`,
+        lines: p ? [(p.box ? `Box ${p.box} · ` : "") + (p.item || "(no item name)"), [fmtQty(p), p.batch && `Batch ${p.batch}`].filter(Boolean).join(" · "), r.tag] : [r.tag] };
+    } });
+}
+
+function finishStop(stop, todo) {
+  if (todo.length && !confirm(`${plural(todo.length, "package")} at this stop ${todo.length > 1 ? "haven't" : "hasn't"} been scanned. Finish the stop anyway? The office will see what was missing.`)) return;
+  const m = S.manifest, doneNow = { ...(m.stopsDone || {}), [stop.id]: true };
+  const all = m.stops.every(s => doneNow[s.id]);
+  S.store.setStopDone(m.id, stop.id, { at: Date.now(), missing: todo.map(p => p.tag), by: S.user.uid }, all ? "done" : "in_progress");
+  S.last = null;
+  location.hash = `#/m/${encodeURIComponent(m.id)}`;
+}
+
+/* ---------------- Bluetooth / USB scanners (they type the code and press Enter) ---------------- */
+let buf = "", lastKey = 0;
+document.addEventListener("keydown", e => {
+  if (document.querySelector(".bcs-scrim")) return;               // the camera screen has its own box
+  const t = e.target; if (t && t.matches && t.matches("input, textarea, select")) return;
+  const { sid } = route(); if (!sid || !S.manifest) return;
+  const now = performance.now();
+  if (now - lastKey > 120) buf = "";
+  lastKey = now;
+  if (e.key === "Enter" || e.key === "Tab") { if (buf.length >= 6) { e.preventDefault(); handleCode(buf, sid, "scanner"); } buf = ""; return; }
+  if (e.key && e.key.length === 1) buf += e.key;
+});
+</script>
+</body>
+</html>

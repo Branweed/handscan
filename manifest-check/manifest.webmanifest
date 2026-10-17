@@ -1,0 +1,15 @@
+{
+  "name": "Manifest Check",
+  "short_name": "Manifest Check",
+  "description": "Scan Metrc package tags against your delivery manifest, even offline.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef2ef",
+  "theme_color": "#17614a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
