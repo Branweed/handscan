@@ -42,12 +42,17 @@ The camera needs **https** (or `localhost`).
 7. **Host it.**
    - **GitHub Pages:** create a repo, upload every file in this folder, then go to Settings → Pages and choose Deploy from branch `main`.
    - **Firebase Hosting:** run `firebase init hosting` and then `firebase deploy`.
-8. Open `admin.html`, sign in, go to **Drivers & trucks**, and add each driver with their truck (e.g. `W99`), email, and a starting password.
+8. Open `admin.html` and sign in. Drivers are added automatically from the manifests you upload; you can also add one by hand on **Drivers & trucks**.
+
+### Drivers and trucks: automatic
+When you upload a run, the app reads the manifest's **Name of Person Transporting**, **Employee ID** and **vehicle** lines.
+- **Truck:** "Ford, Transit 250 White 99, X78446" becomes **W99** ("Berry White" becomes BW, "White Widow" becomes WW). You can correct it, and it's remembered by license plate after that.
+- **New drivers:** they get a login made for them: their **Employee ID** plus a **6-digit PIN** the app picks. The PINs are shown after you send, and any time on **Drivers & trucks → Show PIN**.
 
 ### Driver setup (once per phone)
-1. Open the site in **Chrome** and sign in **while connected to the internet**.
+1. Open **https://branweed.github.io/handscan/** in **Chrome** and sign in with Employee ID + PIN **while connected to the internet**.
 2. Open Chrome's ⋮ menu and choose **Add to Home screen / Install app**.
-3. Each morning, open the app once on Wi-Fi or data so that day's manifests download. After that it works offline all day, and scans upload automatically when there's signal again.
+3. Each morning, open the app once on Wi-Fi or data so that day's run downloads. After that it works offline all day.
 
 ---
 

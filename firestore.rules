@@ -20,6 +20,10 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Office-only: driver PINs and the truck list (trucks are remembered by license plate).
+    match /driverLogins/{uid} { allow read, write: if isAdmin(); }
+    match /trucks/{code} { allow read, write: if isAdmin(); }
+
     // Runs (one per truck per day, holding one or more Metrc manifests).
     // The office does everything; a driver sees only runs sent to them and can only mark stops finished.
     match /manifests/{mid} {

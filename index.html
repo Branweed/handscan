@@ -19,7 +19,7 @@
 <main id="app"><div class="empty">Loading…</div></main>
 <script type="module">
 import { DEMO, h, swap, normalizeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, RESULT, plural, friendlyError,
-  runTitle, manifestNos, crewNames, firstName, driverIdsOf } from "./shared.js";
+  runTitle, manifestNos, crewNames, firstName, driverIdsOf, driverEmail } from "./shared.js";
 import { createStore } from "./store.js";
 import { scanMany, signal } from "./barcode-scanner.js";
 
@@ -96,20 +96,20 @@ function body() {
 
 /* ---------------- sign in ---------------- */
 function loginView() {
-  let msg = h("div", { class: "err" });
-  const email = h("input", { type: "email", autocomplete: "username", placeholder: "Email", "data-k": "email" });
-  const pw = h("input", { type: "password", autocomplete: "current-password", placeholder: "Password", "data-k": "pw" });
+  const msg = h("div", { class: "err" });
+  const id = h("input", { autocomplete: "username", placeholder: "Employee ID (e.g. AR329212)", "data-k": "emp", autocapitalize: "characters", spellcheck: "false", style: { textTransform: "uppercase" } });
+  const pin = h("input", { type: "password", inputmode: "numeric", autocomplete: "current-password", placeholder: "6-digit PIN", "data-k": "pin" });
   return h("form", { class: "card login", onsubmit: async e => {
-      e.preventDefault(); msg.textContent = "Signing in…";
-      try { await S.store.signIn(email.value, pw.value); } catch (err) { msg.textContent = friendlyError(err); }
+      e.preventDefault();
+      const who = id.value.trim();
+      if (!who || !pin.value) { msg.textContent = "Enter your Employee ID and PIN."; return; }
+      msg.textContent = "Signing in…";
+      try { await S.store.signIn(who.includes("@") ? who : driverEmail(who), pin.value.trim()); }
+      catch (err) { msg.textContent = /invalid-credential|wrong-password|user-not-found|invalid-email/.test(err.code || "") ? "That Employee ID or PIN isn't right. Ask the office for your PIN." : friendlyError(err); }
     } },
     h("h2", { class: "title" }, "Driver sign in"),
-    email, pw, h("button", { class: "primary big" }, "Sign in"), msg,
-    h("button", { type: "button", class: "ghost small", onclick: async () => {
-      if (!email.value) { msg.textContent = "Type your email first."; return; }
-      try { await S.store.resetPassword(email.value); msg.textContent = "Check your email for a reset link."; } catch (err) { msg.textContent = friendlyError(err); }
-    } }, "Forgot password?"),
-    h("div", { class: "hint" }, "Sign in once while you have internet. After that the app and your manifests work offline."));
+    id, pin, h("button", { class: "primary big" }, "Sign in"), msg,
+    h("div", { class: "hint" }, "Use the Employee ID on your manifest and the PIN the office gave you. Sign in once while you have internet; after that the app works offline."));
 }
 
 /* ---------------- manifest list ---------------- */

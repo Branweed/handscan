@@ -4,13 +4,15 @@
  *   - DEMO mode otherwise: sample data in this browser's localStorage, no sign-in.
  *
  * Data model (Firestore):
- *   users/{uid}                    { name, email, role: "admin"|"driver", active, truck }
+ *   users/{uid}                    { name, email, role: "admin"|"driver", active, truck, employeeId }
+ *   driverLogins/{uid}             { employeeId, name, pin }   office-only: the PIN the app made for each driver
+ *   trucks/{code}                  { code, nickname, plates[] }  e.g. W99 = "White 99", plate X78446
  *   manifests/{id}                 one delivery run for a truck:
  *                                  { title, date, truck, driverIds[], driverNames[], status, stops[], stopsDone{}, createdAt, updatedAt }
  *                                  each stop: { id, name, license, address, manifestNo, invoiceNo, packages[{ tag, item, qty, uom, batch, box }] }
  *   manifests/{id}/scans/{autoId}  { tag, stopId, result, at, via, driverId, driverName, otherStopId?, raw? }
  */
-import { firebaseConfig, DEMO, uid } from "./shared.js";
+import { firebaseConfig, DEMO, uid, driverEmail, makePin } from "./shared.js";
 
 export const FB_VERSION = "10.12.2";
 const FB = `https://www.gstatic.com/firebasejs/${FB_VERSION}/`;
@@ -50,16 +52,27 @@ async function firebaseStore() {
 
     // office
     watchDrivers: (cb, err) => F.onSnapshot(F.query(F.collection(db, "users"), F.where("role", "==", "driver")), s => cb(list(s)), err),
-    async addDriver({ name, email, password, truck }) {
+    // Makes a driver login: Employee ID + a 6-digit PIN the app picks. Returns { id, pin }.
+    async addDriver({ name, employeeId, truck }) {
+      const emp = String(employeeId || "").trim().toUpperCase();
+      if (!emp) throw new Error("An Employee ID is needed for the driver's login.");
+      const pin = makePin();
       // A second, throwaway Firebase app creates the account so the office stays signed in.
       const sec = appM.initializeApp(firebaseConfig, "add-driver-" + Date.now());
       try {
         const secAuth = A.initializeAuth(sec, { persistence: A.inMemoryPersistence });
-        const cred = await A.createUserWithEmailAndPassword(secAuth, email.trim(), password);
-        await F.setDoc(F.doc(db, "users", cred.user.uid), { name: name.trim(), email: email.trim().toLowerCase(), truck: (truck || "").trim().toUpperCase(), role: "driver", active: true, createdAt: Date.now() });
+        const cred = await A.createUserWithEmailAndPassword(secAuth, driverEmail(emp), pin);
+        const id = cred.user.uid;
+        await F.setDoc(F.doc(db, "users", id), { name: name.trim(), employeeId: emp, email: driverEmail(emp), truck: (truck || "").trim().toUpperCase(), role: "driver", active: true, createdAt: Date.now() });
+        await F.setDoc(F.doc(db, "driverLogins", id), { employeeId: emp, name: name.trim(), pin, createdAt: Date.now() });
         await A.signOut(secAuth);
+        return { id, pin };
       } finally { await appM.deleteApp(sec).catch(() => {}); }
     },
+    watchLogins: (cb, err) => F.onSnapshot(F.collection(db, "driverLogins"), s => cb(list(s)), err),
+    watchTrucks: (cb, err) => F.onSnapshot(F.collection(db, "trucks"), s => cb(list(s)), err),
+    saveTruck: (code, { plate, nickname }) => F.setDoc(F.doc(db, "trucks", code), {
+      code, ...(nickname ? { nickname } : {}), ...(plate ? { plates: F.arrayUnion(plate) } : {}), updatedAt: Date.now() }, { merge: true }),
     setDriver: (id, patch) => F.updateDoc(F.doc(db, "users", id), patch),
     watchAllManifests: (cb, err) => F.onSnapshot(F.query(F.collection(db, "manifests"), F.orderBy("createdAt", "desc"), F.limit(300)), s => cb(list(s)), err),
     async saveManifest(m) { const r = await F.addDoc(F.collection(db, "manifests"), m); return r.id; },
@@ -75,16 +88,18 @@ async function firebaseStore() {
 }
 
 /* ============================== Demo (this browser only) ============================== */
-const KEY = "manifest-check-demo:v2";
+const KEY = "manifest-check-demo:v3";
 function seed() {
   const t = n => "1A4FF01000000220000" + String(n).padStart(5, "0");
   const today = new Date(); const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
   return {
     users: {
       "demo-admin": { name: "Office", email: "office@demo", role: "admin", active: true },
-      "demo-driver": { name: "Demo Driver", email: "driver@demo", role: "driver", active: true, truck: "T1" },
-      "demo-driver-2": { name: "Second Driver", email: "driver2@demo", role: "driver", active: true, truck: "T1" },
+      "demo-driver": { name: "Demo Driver", employeeId: "DEMO1", role: "driver", active: true, truck: "T1" },
+      "demo-driver-2": { name: "Second Driver", employeeId: "DEMO2", role: "driver", active: true, truck: "T1" },
     },
+    logins: { "demo-driver": { employeeId: "DEMO1", name: "Demo Driver", pin: "123456" }, "demo-driver-2": { employeeId: "DEMO2", name: "Second Driver", pin: "654321" } },
+    trucks: { T1: { code: "T1", nickname: "Demo Truck", plates: [] } },
     manifests: {
       "demo-1": {
         date: iso, truck: "T1", driverIds: ["demo-driver", "demo-driver-2"], driverNames: ["Demo Driver", "Second Driver"], status: "assigned",
@@ -141,7 +156,17 @@ function demoStore(role) {
       m.status = status; m.updatedAt = Date.now(); save();
     },
     watchDrivers: cb => watch(() => cb(arr(st.users, u => u.role === "driver"))),
-    async addDriver({ name, email, truck }) { st.users[uid("u")] = { name, email, truck: (truck || "").trim().toUpperCase(), role: "driver", active: true, createdAt: Date.now() }; save(); },
+    async addDriver({ name, employeeId, truck }) {
+      const id = uid("u"), pin = makePin(), emp = String(employeeId || "").trim().toUpperCase();
+      st.users[id] = { name, employeeId: emp, truck: (truck || "").trim().toUpperCase(), role: "driver", active: true, createdAt: Date.now() };
+      (st.logins ||= {})[id] = { employeeId: emp, name, pin }; save(); return { id, pin };
+    },
+    watchLogins: cb => watch(() => cb(arr(st.logins || {}))),
+    watchTrucks: cb => watch(() => cb(arr(st.trucks || {}))),
+    async saveTruck(code, { plate, nickname }) {
+      const t = ((st.trucks ||= {})[code] ||= { code, plates: [] });
+      if (nickname) t.nickname = nickname; if (plate && !t.plates.includes(plate)) t.plates.push(plate); save();
+    },
     async setDriver(id, patch) { Object.assign(st.users[id], patch); save(); },
     watchAllManifests: cb => watch(() => cb(arr(st.manifests).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)))),
     async saveManifest(m) { const id = uid("m"); st.manifests[id] = m; save(); return id; },

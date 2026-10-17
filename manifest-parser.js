@@ -244,8 +244,14 @@ export function parseLines(lines) {
   const all = lines.map(lineText).join("\n");
   const out = { manifestNo: findManifestNo(all), invoiceNo: findInvoiceNo(all), date: findDate(all), stops: [], warnings: [],
     kind: /weight\s*transfer\s*invoice/i.test(all) ? "invoice" : "manifest", transporters: [], vehicle: "" };
+  // the crew: "Name of Person Transporting | John Gomes | Employee ID of Driver | AR329212"
   for (const l of lines) for (let k = 0; k < l.segs.length - 1; k++) {
-    if (/^name\s*of\s*person\s*transporting/i.test(l.segs[k].t) && !out.transporters.includes(l.segs[k + 1].t)) out.transporters.push(l.segs[k + 1].t);
+    if (/^name\s*of\s*person\s*transporting/i.test(l.segs[k].t)) {
+      const name = l.segs[k + 1].t.trim();
+      const idAt = l.segs.findIndex((s, j) => j > k && /employee\s*id/i.test(s.t));
+      const employeeId = idAt >= 0 && l.segs[idAt + 1] ? l.segs[idAt + 1].t.trim().toUpperCase() : "";
+      if (name && !out.transporters.some(t => t.name === name)) out.transporters.push({ name, employeeId });
+    }
     if (/^make,?\s*model/i.test(l.segs[k].t) && !out.vehicle) out.vehicle = l.segs[k + 1].t.replace(/,\s*$/, "");
   }
 
@@ -533,7 +539,7 @@ export function combine(results) {
   return {
     date: dated ? dated.date : "",
     stops, warnings: [...new Set(warnings)],
-    transporters: [...new Set(results.flatMap(r => r.transporters || []))],
+    transporters: [...new Map(results.flatMap(r => r.transporters || []).map(t => [t.employeeId || t.name.toLowerCase(), t])).values()],
     vehicle: (results.find(r => r.vehicle) || {}).vehicle || "",
     files: results.map(r => r.fileName),
     source: results.length > 1 ? "multiple" : (results[0] && results[0].source) || "manual",

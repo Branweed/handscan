@@ -108,6 +108,21 @@ export const runTitle = m => m.title || [m.truck, fmtDate(m.date)].filter(Boolea
 export const crewNames = m => (m.driverNames && m.driverNames.length ? m.driverNames : m.driverName ? [m.driverName] : []).join(" & ");
 export const driverIdsOf = m => (m.driverIds && m.driverIds.length ? m.driverIds : m.driverId ? [m.driverId] : []);
 export const firstName = n => String(n || "").trim().split(/\s+/)[0];
+/* ---------------- trucks + driver logins ---------------- */
+// "Ford, Transit 250 White 99, X78446" → plate "X78446", truck "W99" ("Berry White" → "BW", "White Widow" → "WW")
+export function vehicleInfo(v) {
+  const parts = String(v || "").split(",").map(x => x.trim()).filter(Boolean);
+  const plate = (parts.slice(2).find(x => /^[A-Z0-9-]{4,10}$/i.test(x)) || "").toUpperCase();
+  const words = (parts[1] || parts[0] || "").split(/\s+/).filter(Boolean);
+  const modelAt = words.findIndex(w => /\d/.test(w));
+  const nick = modelAt >= 0 && modelAt < words.length - 1 ? words.slice(modelAt + 1) : words.slice(1);
+  const code = nick.map(w => (/^\d+$/.test(w) ? w : w[0].toUpperCase())).join("");
+  return { plate, nickname: nick.join(" "), code };
+}
+// Drivers sign in with their Employee ID; behind the scenes that's this made-up email address.
+export const DRIVER_DOMAIN = "drivers.handscan.app";
+export const driverEmail = id => `${String(id || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "")}@${DRIVER_DOMAIN}`;
+export const makePin = () => { const a = new Uint32Array(1); crypto.getRandomValues(a); return String(100000 + (a[0] % 900000)); };
 export const packageCount = m => (m.stops || []).reduce((n, s) => n + (s.packages || []).length, 0);
 export const stopIsDone = (m, id) => !!(m.stopsDone && m.stopsDone[id]);
 

@@ -42,12 +42,12 @@ table.res th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-s
 <main id="app"><div class="empty">Loading…</div></main>
 <script type="module">
 import { DEMO, h, swap, uid, normalizeTag, looksLikeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, plural, downloadCsv,
-  friendlyError, manifestNos, runTitle, crewNames, driverIdsOf, firstName } from "./shared.js";
+  friendlyError, manifestNos, runTitle, crewNames, driverIdsOf, firstName, vehicleInfo } from "./shared.js";
 import { createStore } from "./store.js";
 
 const root = document.getElementById("app"), $ = id => document.getElementById(id);
 const A = { store: null, user: undefined, profile: undefined, tab: "upload", drivers: [], manifests: [], draft: null, busy: "", error: "",
-  openId: null, openScans: [], showArchived: false, showRaw: false, newDriver: null, unsub: {} };
+  openId: null, openScans: [], showArchived: false, showRaw: false, newDriver: null, logins: {}, trucksDb: [], newLogins: null, showPins: {}, unsub: {} };
 
 (async () => {
   try { A.store = await createStore("admin"); }
@@ -60,6 +60,8 @@ const A = { store: null, user: undefined, profile: undefined, tab: "upload", dri
       if (p && p.role === "admin" && was !== "admin") {
         A.unsub.d = A.store.watchDrivers(l => { A.drivers = l.sort((a, b) => String(a.name).localeCompare(String(b.name))); render(); }, onErr);
         A.unsub.m = A.store.watchAllManifests(l => { A.manifests = l; render(); }, onErr);
+        A.unsub.l = A.store.watchLogins(l => { A.logins = Object.fromEntries(l.map(x => [x.id, x])); render(); }, onErr);
+        A.unsub.t = A.store.watchTrucks(l => { A.trucksDb = l; render(); }, onErr);
       }
       render();
     }, onErr);
@@ -171,7 +173,11 @@ async function readFiles(list) {
     const results = [];
     for (const f of files) results.push(await P.parseManifestFile(f));
     const run = P.combine(results);
-    A.draft = { ...run, date: run.date || today(), sendTo: guessSendTo(run.transporters) };
+    const vi = vehicleInfo(run.vehicle);
+    const known = vi.plate && A.trucksDb.find(t => (t.plates || []).includes(vi.plate));
+    A.draft = { ...run, date: run.date || today(), sendTo: guessSendTo(run.transporters.map(t => t.name)),
+      truck: known ? known.code : vi.code, plate: vi.plate, nickname: vi.nickname,
+      crew: run.transporters.map(t => ({ ...t, include: true })), extra: "" };
     if (!run.stops.length) A.draft.stops = blankDraft().stops;
   } catch (e) {
     console.error(e);
@@ -186,14 +192,14 @@ function draftView() {
   const allTags = d.stops.flatMap(s => s.packages.map(p => normalizeTag(p.tag)).filter(Boolean));
   const dupTags = new Set(allTags.filter((t, i) => allTags.indexOf(t) !== i));
   const set = (obj, key) => e => { obj[key] = e.target.value; };
-  const rc = recipients(d.sendTo);
-  const nameNotes = rc ? (d.transporters || []).map(n => {
-    const hit = rc.names.find(x => sameName(n, x));
-    const ends = x => { const t = toks(x); return t[0] + " " + t[t.length - 1]; };   // ignore middle initials
-    return hit && ends(hit) !== ends(n) ? `${hit} is spelled "${n}" on the manifest.` : null;
-  }).filter(Boolean) : [];
+  const hasCrew = d.crew && d.crew.length;
+  const rc = hasCrew ? null : recipients(d.sendTo);
+  const crewReady = hasCrew && d.crew.some(c => c.include) && String(d.truck || "").trim();
   const crit = (d.warnings || []).filter(w => w.startsWith("⚠")), other = (d.warnings || []).filter(w => !w.startsWith("⚠"));
   const checked = (d.stops || []).filter(s => s.invoiceNo && s.manifestNo).length;
+  const sendLabel = hasCrew
+    ? (crewReady ? `Send to ${String(d.truck).toUpperCase()} (${d.crew.filter(c => c.include).map(c => firstName(c.name)).join(" & ")})` : "Fill in the truck and crew")
+    : rc ? `Send to ${rc.truck && d.sendTo.startsWith("truck:") ? rc.truck + " (" + rc.names.map(firstName).join(" & ") + ")" : rc.names[0]}` : "Choose who gets this run";
   return h("div", null,
     h("div", { class: "card" },
       h("div", { class: "rb" }, h("h2", { class: "title", style: { margin: 0 } }, "Check the run"),
@@ -204,9 +210,8 @@ function draftView() {
       other.length ? h("ul", { class: "warnlist" }, other.map(w => h("li", null, w))) : null,
       h("div", { class: "grid2", style: { marginTop: "12px" } },
         h("label", { class: "f" }, "Delivery date", h("input", { type: "date", "data-k": "d-date", value: d.date, oninput: set(d, "date") })),
-        h("label", { class: "f" }, "Send to", h("select", { "data-k": "d-to", onchange: e => { d.sendTo = e.target.value; render(); } }, sendToOptions(d.sendTo)))),
-      d.transporters && d.transporters.length ? h("div", { class: "hint" }, `On the manifest: ${d.transporters.join(", ")}${d.vehicle ? ` · ${d.vehicle}` : ""}`) : null,
-      nameNotes.length ? h("div", { class: "hint" }, nameNotes.join(" ")) : null),
+        hasCrew ? null : h("label", { class: "f" }, "Send to", h("select", { "data-k": "d-to", onchange: e => { d.sendTo = e.target.value; render(); } }, sendToOptions(d.sendTo))))),
+    hasCrew ? crewCard(d) : null,
     d.stops.map((s, si) => h("div", { class: "card stopcard" },
       h("div", { class: "rb" }, h("b", null, `Stop ${si + 1}`),
         h("div", { class: "btns" },
@@ -242,15 +247,57 @@ function draftView() {
       h("div", { class: "meta" }, "If the reader got something wrong, copy this text so the reader can be adjusted."),
       A.showRaw ? h("pre", { class: "raw" }, d.rawText) : null) : null,
     h("div", { class: "sticky-actions" },
-      h("button", { class: "primary", style: { flex: 1 }, disabled: !rc || !total, onclick: saveDraft },
-        rc ? `Send to ${rc.truck && d.sendTo.startsWith("truck:") ? rc.truck + " (" + rc.names.map(firstName).join(" & ") + ")" : rc.names[0]}` : "Choose who gets this run"),
+      h("button", { class: "primary", style: { flex: 1 }, disabled: !total || (hasCrew ? !crewReady : !rc), onclick: saveDraft }, sendLabel),
       h("button", { onclick: () => { if (confirm("Throw away this run?")) { A.draft = null; render(); } } }, "Discard")));
 }
 const move = (arr, i, dir) => { const [x] = arr.splice(i, 1); arr.splice(i + dir, 0, x); };
 
+// The drivers named on the manifest, matched to existing logins by Employee ID (or by name).
+function matchDriver(c) {
+  const emp = String(c.employeeId || "").toUpperCase();
+  return A.drivers.find(d => emp && String(d.employeeId || "").toUpperCase() === emp)
+    || A.drivers.find(d => !d.employeeId && sameName(c.name, dName(d)));
+}
+function crewCard(d) {
+  const others = A.drivers.filter(x => x.active !== false && !d.crew.some(c => matchDriver(c) === x));
+  return h("div", { class: "card" },
+    h("b", null, "Truck & crew (from the manifest)"),
+    h("div", { class: "grid2", style: { marginTop: "10px" } },
+      h("label", { class: "f" }, "Truck", h("input", { "data-k": "d-truck", value: d.truck || "", placeholder: "e.g. W99", style: { textTransform: "uppercase" },
+        oninput: e => { d.truck = e.target.value; }, onchange: () => render() })),
+      d.vehicle ? h("div", { class: "meta", style: { alignSelf: "end" } }, `Vehicle on manifest: ${d.vehicle}`) : null),
+    d.crew.map((c, i) => {
+      const m = matchDriver(c), off = m && m.active === false;
+      return h("div", { class: "pkg" },
+        h("input", { type: "checkbox", checked: c.include, style: { width: "22px", minHeight: "22px", marginTop: "3px" }, onchange: e => { c.include = e.target.checked; render(); } }),
+        h("div", { class: "main" },
+          h("div", { class: "name" }, m ? dName(m) : c.name),
+          h("div", { class: "meta" }, [c.employeeId ? `Employee ID ${c.employeeId}` : "No Employee ID on the manifest", m && dName(m) !== c.name && `on manifest as "${c.name}"`].filter(Boolean).join(" · "))),
+        off ? h("span", { class: "chip bad" }, "Login turned off") : m ? h("span", { class: "chip ok" }, "Has a login")
+          : c.employeeId ? h("span", { class: "chip warn" }, "New: a login will be made") : h("span", { class: "chip bad" }, "Needs an Employee ID"));
+    }),
+    others.length ? h("label", { class: "f", style: { marginTop: "10px" } }, "Also send to (optional)",
+      h("select", { onchange: e => { d.extra = e.target.value; } }, h("option", { value: "" }, "Nobody else"),
+        others.map(x => h("option", { value: x.id, selected: d.extra === x.id }, dName(x) + (x.truck ? ` (${x.truck})` : ""))))) : null);
+}
+
 async function saveDraft() {
-  const d = A.draft, rc = recipients(d.sendTo);
-  if (!rc) { alert("Choose a truck or driver first."); return; }
+  const d = A.draft;
+  let rc = null;
+  if (d.crew && d.crew.length) {
+    const truck = String(d.truck || "").trim().toUpperCase();
+    const crew = d.crew.filter(c => c.include);
+    if (!truck || !crew.length) { alert("Fill in the truck and pick at least one driver."); return; }
+    const missing = crew.filter(c => !matchDriver(c) && !c.employeeId);
+    if (missing.length) { alert(`${missing.map(c => c.name).join(", ")} has no Employee ID, so a login can't be made. Untick them, or add them on the Drivers tab.`); return; }
+    rc = { truck, ids: [], names: [], make: [] };
+    for (const c of crew) { const m = matchDriver(c); if (m) { rc.ids.push(m.id); rc.names.push(dName(m)); } else rc.make.push(c); }
+    const extra = d.extra && A.drivers.find(x => x.id === d.extra);
+    if (extra && !rc.ids.includes(extra.id)) { rc.ids.push(extra.id); rc.names.push(dName(extra)); }
+  } else {
+    rc = recipients(d.sendTo);
+    if (!rc) { alert("Choose a truck or driver first."); return; }
+  }
   const stops = d.stops.map((s, i) => ({ id: s.id, name: s.name.trim() || `Stop ${i + 1}`, license: s.license.trim(), address: s.address.trim(),
     manifestNo: String(s.manifestNo || "").trim(), invoiceNo: String(s.invoiceNo || "").trim(),
     packages: s.packages.map(p => ({ tag: normalizeTag(p.tag), item: p.item.trim(), qty: String(p.qty).trim(), uom: p.uom.trim(), batch: p.batch.trim(), box: String(p.box || "").trim() })).filter(p => p.tag) }))
@@ -268,8 +315,25 @@ async function saveDraft() {
     createdAt: Date.now(), updatedAt: Date.now(), source: d.source || "manual", files: d.files || [] };
   m.title = [m.truck, fmtDate(m.date)].filter(Boolean).join(" · ");
   A.busy = "Sending…"; render();
-  try { const id = await A.store.saveManifest(m); A.draft = null; A.tab = "manifests"; openManifest(id); }
-  catch (e) { A.error = friendlyError(e); }
+  const made = [];
+  try {
+    // new drivers from the manifest get a login (Employee ID + PIN); known drivers move to this truck
+    for (const c of rc.make || []) {
+      A.busy = `Making a login for ${c.name}…`; render();
+      const r = await A.store.addDriver({ name: c.name, employeeId: c.employeeId, truck: rc.truck });
+      rc.ids.push(r.id); rc.names.push(c.name); made.push({ name: c.name, employeeId: c.employeeId, pin: r.pin });
+    }
+    if (d.crew && d.crew.length) {
+      for (const id of rc.ids) { const x = A.drivers.find(y => y.id === id); if (x && x.truck !== rc.truck && d.crew.some(c => matchDriver(c) === x)) await A.store.setDriver(id, { truck: rc.truck }); }
+      if (d.plate || d.nickname) await A.store.saveTruck(rc.truck, { plate: d.plate, nickname: d.nickname });
+    }
+    m.truck = rc.truck; m.driverIds = rc.ids; m.driverNames = rc.names;
+    m.title = [m.truck, fmtDate(m.date)].filter(Boolean).join(" · ");
+    const id = await A.store.saveManifest(m);
+    A.draft = null; A.tab = "manifests"; A.newLogins = made.length ? made : null; openManifest(id);
+  } catch (e) {
+    A.error = friendlyError(e) + (made.length ? ` (Logins already made: ${made.map(x => `${x.name} ${x.employeeId} PIN ${x.pin}`).join("; ")})` : "");
+  }
   A.busy = ""; render();
 }
 
@@ -285,6 +349,7 @@ function manifestsView() {
   const list = A.manifests.filter(m => A.showArchived || m.status !== "archived");
   const open = A.manifests.find(m => m.id === A.openId);
   return h("div", null,
+    A.newLogins ? loginsCard(A.newLogins) : null,
     open ? detailView(open) : null,
     h("div", { class: "card" },
       h("div", { class: "rb" }, h("b", null, "All runs"),
@@ -360,38 +425,58 @@ function exportResults(m, sum) {
 }
 
 /* ======================= drivers + trucks ======================= */
+function loginsCard(list) {
+  return h("div", { class: "card", style: { border: "2px solid var(--ok)" } },
+    h("div", { class: "rb" }, h("b", null, `New driver login${list.length > 1 ? "s" : ""}: give ${list.length > 1 ? "these" : "this"} to the driver`),
+      h("button", { class: "small ghost", onclick: () => { A.newLogins = null; render(); } }, "Done")),
+    list.map(x => h("div", { class: "pkg" },
+      h("div", { class: "main" }, h("div", { class: "name" }, x.name), h("div", { class: "meta" }, `Sign in at ${location.origin}${location.pathname.replace(/admin\.html$/, "")}`)),
+      h("div", null, h("div", { class: "meta" }, "Employee ID"), h("b", { style: { fontSize: "18px" } }, x.employeeId)),
+      h("div", null, h("div", { class: "meta" }, "PIN"), h("b", { style: { fontSize: "18px", letterSpacing: ".08em" } }, x.pin)))),
+    h("div", { class: "hint" }, "You can look these up again any time on the Drivers & trucks tab."));
+}
 function driversView() {
-  const f = A.newDriver ||= { name: "", email: "", password: "", truck: "" };
+  const f = A.newDriver ||= { name: "", employeeId: "", truck: "" };
   const msg = h("div", { class: "err" });
   const ts = trucks(), loose = A.drivers.filter(d => !d.truck || d.active === false);
-  const row = x => h("div", { class: "pkg" },
-    h("div", { class: "ic" }, (x.name || "?")[0].toUpperCase()),
-    h("div", { class: "main" }, h("div", { class: "name" }, x.name || "(no name)"), h("div", { class: "meta" }, x.email || "")),
-    h("label", { class: "meta", style: { display: "flex", alignItems: "center", gap: "6px" } }, "Truck",
-      h("input", { class: "inl", value: x.truck || "", placeholder: "—", onchange: e => A.store.setDriver(x.id, { truck: e.target.value.trim().toUpperCase() }).catch(onErr) })),
-    x.active === false ? h("span", { class: "chip bad" }, "Off") : null,
-    h("button", { class: "small", onclick: () => A.store.setDriver(x.id, { active: x.active === false }).catch(onErr) }, x.active === false ? "Turn on" : "Turn off"));
+  const nick = t => (A.trucksDb.find(x => x.code === t) || {}).nickname;
+  const row = x => {
+    const lg = A.logins[x.id], shown = A.showPins[x.id];
+    return h("div", { class: "pkg", style: { flexWrap: "wrap" } },
+      h("div", { class: "ic" }, (x.name || "?")[0].toUpperCase()),
+      h("div", { class: "main", style: { minWidth: "160px" } }, h("div", { class: "name" }, x.name || "(no name)"),
+        h("div", { class: "meta" }, x.employeeId ? `Employee ID ${x.employeeId}` : x.email || "")),
+      lg ? h("button", { class: "small ghost", onclick: () => { A.showPins[x.id] = !shown; render(); } }, shown ? `PIN ${lg.pin}` : "Show PIN") : null,
+      h("label", { class: "meta", style: { display: "flex", alignItems: "center", gap: "6px" } }, "Truck",
+        h("input", { class: "inl", value: x.truck || "", placeholder: "—", onchange: e => A.store.setDriver(x.id, { truck: e.target.value.trim().toUpperCase() }).catch(onErr) })),
+      x.active === false ? h("span", { class: "chip bad" }, "Off") : null,
+      h("button", { class: "small", onclick: () => A.store.setDriver(x.id, { active: x.active === false }).catch(onErr) }, x.active === false ? "Turn on" : "Turn off"));
+  };
   return h("div", null,
+    A.newLogins ? loginsCard(A.newLogins) : null,
+    h("div", { class: "card" }, h("b", null, "How drivers get here"),
+      h("p", { class: "meta", style: { margin: "6px 0 0" } }, "Upload a run and the drivers named on the manifest are added for you, with a login made from their Employee ID and a 6-digit PIN. The truck comes from the manifest's vehicle line and is remembered by its license plate. You can also add a driver by hand below.")),
     ts.map(([t, list]) => h("div", { class: "card" },
-      h("div", { class: "rb" }, h("span", { class: "truckname" }, `🚚 ${t}`), h("span", { class: "meta" }, `Runs sent to ${t} go to all ${plural(list.length, "driver")}`)),
+      h("div", { class: "rb" }, h("span", { class: "truckname" }, `🚚 ${t}${nick(t) ? ` · ${nick(t)}` : ""}`), h("span", { class: "meta" }, plural(list.length, "driver"))),
       list.map(row))),
     loose.length ? h("div", { class: "card" }, h("b", null, ts.length ? "No truck / turned off" : "Drivers"), loose.map(row)) : null,
-    !A.drivers.length ? h("div", { class: "card empty" }, "No drivers yet. Add your first one below.") : null,
     h("form", { class: "card", onsubmit: async e => {
         e.preventDefault();
-        if (!f.name.trim() || !f.email.trim()) { msg.textContent = "Enter a name and email."; return; }
-        if (!A.store.demo && f.password.length < 6) { msg.textContent = "The password needs at least 6 characters."; return; }
-        msg.textContent = "Adding…";
-        try { await A.store.addDriver(f); A.newDriver = { name: "", email: "", password: "", truck: f.truck }; render(); } catch (err) { msg.textContent = friendlyError(err); }
+        if (!f.name.trim() || !f.employeeId.trim()) { msg.textContent = "Enter the driver's name and Employee ID."; return; }
+        if (A.drivers.some(d => String(d.employeeId || "").toUpperCase() === f.employeeId.trim().toUpperCase())) { msg.textContent = "There's already a driver with that Employee ID."; return; }
+        msg.textContent = "Making the login…";
+        try {
+          const r = await A.store.addDriver(f);
+          A.newLogins = [{ name: f.name.trim(), employeeId: f.employeeId.trim().toUpperCase(), pin: r.pin }];
+          A.newDriver = { name: "", employeeId: "", truck: f.truck }; render(); scrollTo({ top: 0, behavior: "smooth" });
+        } catch (err) { msg.textContent = /email-already-in-use/.test(err.code || "") ? "A login for that Employee ID already exists." : friendlyError(err); }
       } },
-      h("h2", { class: "title", style: { marginTop: 0 } }, "Add a driver"),
+      h("h2", { class: "title", style: { marginTop: 0 } }, "Add a driver by hand"),
       h("div", { class: "grid2" },
-        h("label", { class: "f" }, "Name", h("input", { "data-k": "nd-n", value: f.name, oninput: e => { f.name = e.target.value; }, placeholder: "e.g. John Gomez" })),
-        h("label", { class: "f" }, "Truck", h("input", { "data-k": "nd-t", value: f.truck, oninput: e => { f.truck = e.target.value; }, placeholder: "e.g. W99", style: { textTransform: "uppercase" } })),
-        h("label", { class: "f" }, "Email (their sign-in)", h("input", { type: "email", "data-k": "nd-e", value: f.email, oninput: e => { f.email = e.target.value; } })),
-        h("label", { class: "f" }, "Starting password", h("input", { "data-k": "nd-p", value: f.password, autocomplete: "new-password", oninput: e => { f.password = e.target.value; } }))),
-      h("div", { class: "btns", style: { marginTop: "12px" } }, h("button", { class: "primary" }, "Add driver")), msg,
-      h("p", { class: "meta" }, "Drivers on the same truck share its runs: both see them, both can scan, and the count is shared. Give each driver their email and starting password; they can change it with \"Forgot password?\".")));
+        h("label", { class: "f" }, "Name", h("input", { "data-k": "nd-n", value: f.name, oninput: e => { f.name = e.target.value; }, placeholder: "e.g. John Gomes" })),
+        h("label", { class: "f" }, "Employee ID", h("input", { "data-k": "nd-e", value: f.employeeId, oninput: e => { f.employeeId = e.target.value; }, placeholder: "e.g. AR329212", style: { textTransform: "uppercase" } })),
+        h("label", { class: "f" }, "Truck", h("input", { "data-k": "nd-t", value: f.truck, oninput: e => { f.truck = e.target.value; }, placeholder: "e.g. W99", style: { textTransform: "uppercase" } }))),
+      h("div", { class: "btns", style: { marginTop: "12px" } }, h("button", { class: "primary" }, "Add driver")), msg));
 }
 </script>
 </body>
