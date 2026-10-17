@@ -1,0 +1,45 @@
+rules_version = '2';
+// Paste this into Firebase console → Firestore Database → Rules, then Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function hasProfile() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function isAdmin() { return hasProfile() && profile().role == 'admin'; }
+    function isDriver() { return hasProfile() && profile().role == 'driver' && profile().active == true; }
+    // A run is shared by every driver on the truck it was sent to.
+    function onRun(data) { return request.auth.uid in data.driverIds; }
+    function ownsManifest(mid) {
+      return onRun(get(/databases/$(database)/documents/manifests/$(mid)).data);
+    }
+
+    // People. Only the office can create or change accounts' roles.
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // Runs (one per truck per day, holding one or more Metrc manifests).
+    // The office does everything; a driver sees only runs sent to them and can only mark stops finished.
+    match /manifests/{mid} {
+      allow read: if isAdmin() || (isDriver() && onRun(resource.data));
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (isDriver() && onRun(resource.data)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stopsDone', 'status', 'updatedAt'])
+            && request.resource.data.status in ['assigned', 'in_progress', 'done']);
+
+      // Scans. Drivers can add (never edit or delete) scans on their own runs.
+      match /scans/{sid} {
+        allow read: if isAdmin() || (isDriver() && ownsManifest(mid));
+        allow create: if isAdmin()
+          || (isDriver() && ownsManifest(mid)
+              && request.resource.data.driverId == request.auth.uid
+              && request.resource.data.tag is string && request.resource.data.tag.size() <= 64
+              && request.resource.data.result in ['match', 'duplicate', 'wrong_stop', 'not_on_manifest']);
+        allow update, delete: if isAdmin();
+      }
+    }
+  }
+}
