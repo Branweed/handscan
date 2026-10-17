@@ -5,12 +5,12 @@
 //  and everything stays in this browser.
 // ==========================================================================================
 export const firebaseConfig = {
-  apiKey: "PASTE_YOUR_API_KEY",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: "",
+  apiKey: "AIzaSyBgmmC3mCSgw5htmIfYKv9gVK3VkhRnFgQ",
+  authDomain: "handscan-72136.firebaseapp.com",
+  projectId: "handscan-72136",
+  storageBucket: "handscan-72136.firebasestorage.app",
+  messagingSenderId: "870432272595",
+  appId: "1:870432272595:web:b4e06f88feecad5156e426",
 };
 export const DEMO = !firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith("PASTE");
 
