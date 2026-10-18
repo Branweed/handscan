@@ -60,13 +60,10 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catc
   const saved = loadDriver();
   if (saved) { S.pickName = saved.name || ""; S.lastTruck = saved.truck || ""; }
   // Opening the app always starts on the truck buttons. Only a link straight into a run (e.g. a reload mid-stop) skips them.
-  setDriver(route().mid && saved && saved.truck ? saved : null);
+  setDriver(!onPicker() && saved && saved.truck ? saved : null);
   addEventListener("hashchange", () => { followRoute(); render(); scrollTo(0, 0); });
   addEventListener("online", render); addEventListener("offline", render);
-  $("menu").onclick = () => {
-    if (S.pending && !confirm(`${plural(S.pending, "scan")} haven't uploaded yet. Switch trucks anyway? They'll still upload once you're online.`)) return;
-    location.hash = ""; setDriver(null);
-  };
+  $("menu").onclick = () => { location.hash = ""; };   // back to "Who are you? / Which truck?" (scans waiting to upload still upload)
 })();
 function setDriver(d) {
   ["list", "m", "sc"].forEach(k => { S.unsub[k] && S.unsub[k](); S.unsub[k] = null; });
@@ -82,8 +79,8 @@ const isLockedErr = e => !!e && (e.code === "permission-denied" || /permission/i
 function lockPhone() { if (!S.locked) { S.locked = true; render(); } }
 function startWatching() {
   ["trucks", "names"].forEach(k => { S.unsub[k] && S.unsub[k](); S.unsub[k] = null; });
-  S.unsub.trucks = S.store.watchTrucks(l => { S.trucks = l; S.locked = false; if (!S.driver) render(); }, e => isLockedErr(e) ? lockPhone() : console.warn(e));
-  S.unsub.names = S.store.watchDriverNames(n => { S.driverNames = n; if (!S.driver) render(); }, () => {});
+  S.unsub.trucks = S.store.watchTrucks(l => { S.trucks = l.filter(t => !String(t.id || "").startsWith("_")); S.locked = false; if (!S.driver) render(); }, e => isLockedErr(e) ? lockPhone() : console.warn(e));
+  S.unsub.names = S.store.watchDriverNames(n => { S.driverNames = n; if (onPicker()) render(); }, () => {});
 }
 async function unlock(e) {
   e.preventDefault();
@@ -115,6 +112,8 @@ function lockView() {
     h("a", { class: "btn big office", href: "admin.html#office" }, "🔒  Office / Admin"));
 }
 
+// No hash = the first screen (name + truck). "#/" = that truck's runs, "#/m/…" = a run.
+const onPicker = () => !location.hash || location.hash === "#";
 function route() {
   const m = location.hash.match(/^#\/m\/([^/]+)(?:\/s\/([^/]+))?/);
   return m ? { mid: decodeURIComponent(m[1]), sid: m[2] ? decodeURIComponent(m[2]) : null } : {};
@@ -138,7 +137,7 @@ function render() {
   $("menu").textContent = "Trucks";
   if (S.driver === undefined) return;
   if (S.locked) { $("menu").hidden = true; return swap(root, lockView()); }
-  if (!S.driver) return swap(root, loginView());
+  if (!S.driver || onPicker()) { $("menu").hidden = true; return swap(root, loginView()); }
   swap(root, h("div", null,
     S.store.demo ? h("div", { class: "banner" }, "Demo mode: data stays on this device. Tap a package to pretend-scan it. ",
       h("button", { class: "small", onclick: () => { if (confirm("Reset the demo data?")) { S.store.reset(); location.hash = ""; } } }, "Reset demo")) : null,
@@ -162,7 +161,8 @@ function loginView() {
   for (const t of S.trucks) { const k = byCode.get(t.code) || {}; byCode.set(t.code, { ...k, ...t, crew: mergeCrew([...(k.crew || []), ...(t.crew || [])]) }); }
   const order = c => { const i = KNOWN_TRUCKS.findIndex(t => t.code === c); return i < 0 ? 99 : i; };
   const trucks = [...byCode.values()].sort((a, b) => order(a.code) - order(b.code) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
-  const start = code => { const c = String(code || "").trim().toUpperCase(); if (c) setDriver({ truck: c, name: S.pickName.trim() }); };
+  // picking a truck is a new screen, so the phone's Back button returns here
+  const start = code => { const c = String(code || "").trim().toUpperCase(); if (!c) return; setDriver({ truck: c, name: S.pickName.trim() }); location.hash = "#/"; };
   // one plain A–Z list of every driver; which truck they're in today is picked separately below
   const source = S.driverNames && S.driverNames.length ? S.driverNames.map(name => ({ name })) : trucks.flatMap(t => t.crew || []);
   const people = mergeCrew(source).map(c => c.name).sort((a, b) => a.localeCompare(b));
@@ -173,6 +173,8 @@ function loginView() {
     S.pickName && !listed ? h("option", { value: S.pickName, selected: true }, S.pickName) : null);
   return h("div", { class: "pick" },
     h("label", { class: "f pick-name" }, "Who are you?", nameSel),
+    S.pickName ? h("div", { class: "hint picked" }, `✓ Hi ${firstName(S.pickName)} — your scans will show your name. Now tap the truck you're on today.`)
+      : h("div", { class: "hint" }, "Pick your name so the office knows who scanned. No password needed."),
     h("h2", { class: "pick-q" }, "Which truck are you on?"),
     h("div", { class: "trucks" }, trucks.map(t => {
       const last = t.code === S.lastTruck;
@@ -198,6 +200,7 @@ function listView() {
   const ms = S.manifests.filter(m => m.status !== "archived")
     .sort((a, b) => (a.status === "done") - (b.status === "done") || String(b.date || "").localeCompare(String(a.date || "")) || (b.createdAt || 0) - (a.createdAt || 0));
   return h("div", null,
+    h("a", { class: "back", href: "#" }, "← Change name or truck"),
     h("h2", { class: "title" }, `${S.driver.truck}${S.driver.name ? ` · ${firstName(S.driver.name)}` : ""}`),
     ms.length ? ms.map(m => {
       const stops = (m.stops || []).length, done = (m.stops || []).filter(s => stopIsDone(m, s.id)).length;

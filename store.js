@@ -13,7 +13,7 @@
  *   manifests/{id}/scans/{autoId}  { tag, stopId, result, at, via, driverId, driverName, otherStopId?, raw? }
  *                                  stopId "load" = a load-check scan at the dock; stopsDone.load = load check finished
  *   settings/access                { code }            office-only: the company code phones enter once
- *   settings/drivers               { names[] }         the "Who are you?" list (approved phones can read it)
+ *   trucks/_drivers                { names[] }         the "Who are you?" list (kept beside the trucks; not a truck)
  *   devices/{uid}                  { code, at, name }  one per approved phone (anonymous sign-in); the office can remove them
  */
 import { firebaseConfig, DEMO, uid, driverEmail, makePin, adminEmail } from "./shared.js";
@@ -54,7 +54,7 @@ async function firebaseStore() {
       }
       await F.setDoc(F.doc(db, "devices", auth.currentUser.uid), { code: String(code).trim(), at: Date.now(), name: String(name || "").slice(0, 80) });
     },
-    watchDriverNames: (cb, err) => F.onSnapshot(F.doc(db, "settings", "drivers"), s => cb(s.exists() ? (s.data().names || []) : null), err),
+    watchDriverNames: (cb, err) => F.onSnapshot(F.doc(db, "trucks", "_drivers"), s => cb(s.exists() ? (s.data().names || []) : null), err),
 
     // driver: no account, just a truck name
     watchTruckRuns: (truck, cb, err) => F.onSnapshot(F.query(F.collection(db, "manifests"), F.where("truck", "==", truck)), s => cb(list(s)), err),
@@ -114,8 +114,8 @@ async function firebaseStore() {
       const s = await F.getDocs(F.collection(db, "devices"));
       for (let i = 0; i < s.docs.length; i += 400) { const b = F.writeBatch(db); s.docs.slice(i, i + 400).forEach(d => b.delete(d.ref)); await b.commit(); }
     },
-    setDriverNames: names => F.setDoc(F.doc(db, "settings", "drivers"), { names, updatedAt: Date.now() }),
-    addDriverNames: names => F.setDoc(F.doc(db, "settings", "drivers"), { names: F.arrayUnion(...names), updatedAt: Date.now() }, { merge: true }),
+    setDriverNames: names => F.setDoc(F.doc(db, "trucks", "_drivers"), { names, updatedAt: Date.now() }),
+    addDriverNames: names => F.setDoc(F.doc(db, "trucks", "_drivers"), { names: F.arrayUnion(...names), updatedAt: Date.now() }, { merge: true }),
     watchAllManifests: (cb, err) => F.onSnapshot(F.query(F.collection(db, "manifests"), F.orderBy("createdAt", "desc"), F.limit(300)), s => cb(list(s)), err),
     async saveManifest(m) { const r = await F.addDoc(F.collection(db, "manifests"), m); return r.id; },
     updateManifest: (id, patch) => F.updateDoc(F.doc(db, "manifests", id), { ...patch, updatedAt: Date.now() }),

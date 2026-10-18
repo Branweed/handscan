@@ -25,8 +25,6 @@ service cloud.firestore {
 
     // The company code: only the office can read or change it. (Rules can still compare against it below.)
     match /settings/access { allow read, write: if isAdmin(); }
-    // The "Who are you?" list on the phones.
-    match /settings/drivers { allow read: if canSeeRuns(); allow write: if isAdmin(); }
 
     // Approved phones. A phone can add itself only with the right company code; the office can remove any.
     match /devices/{uid} {
@@ -39,7 +37,7 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Trucks: approved phones see the list; only the office changes it.
+    // Trucks (and trucks/_drivers, the "Who are you?" list): approved phones see them; only the office changes them.
     match /trucks/{code} { allow read: if canSeeRuns(); allow write: if isAdmin(); }
 
     // Runs. Phones can only mark stops (and the load check) finished and add scans; the office does everything else.

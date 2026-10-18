@@ -128,3 +128,4 @@ label.f>input,label.f>select{margin-top:4px}
 .lockcard .manual{max-width:340px;margin:14px auto 0}
 .codein{font-size:22px !important;letter-spacing:.2em;text-align:center;font-family:ui-monospace,Menlo,Consolas,monospace !important}
 .bigcode{font:800 22px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.15em}
+.hint.picked{color:var(--ok);font-weight:700}

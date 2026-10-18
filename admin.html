@@ -96,7 +96,7 @@ const A = { store: null, user: undefined, profile: undefined, tab: "upload", adm
       if (p && p.role === "admin" && was !== "admin") {
         A.unsub.d = A.store.watchAdmins(l => { A.admins = l.sort((a, b) => String(a.name).localeCompare(String(b.name))); render(); }, onErr);
         A.unsub.m = A.store.watchAllManifests(l => { A.manifests = l; render(); }, onErr);
-        A.unsub.t = A.store.watchTrucks(l => { A.trucksDb = l; A.trucksLoaded = true; seedDriverNames(); render(); }, onErr);
+        A.unsub.t = A.store.watchTrucks(l => { A.trucksDb = l.filter(t => !String(t.id || "").startsWith("_")); A.trucksLoaded = true; seedDriverNames(); render(); }, onErr);
         // these need the new Firestore rules; until they're published, the cards say so instead of showing an error
         const needRules = k => e => { console.warn(e); A[k] = "rules"; render(); };
         A.unsub.a = A.store.watchAccess(a => { A.access = a; render(); }, needRules("access"));
