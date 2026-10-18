@@ -3,9 +3,8 @@ rules_version = '2';
 //
 // Who can see what:
 //   • Office admins (username + password): everything.
-//   • Signed-in phones: runs, scans and the truck list. A phone signs in invisibly (Firebase "Anonymous" sign-in);
-//     then a driver picks their name and enters their own PIN. The first time, they use the company PIN and pick their own.
-//   • Anyone else (someone who only has the link): nothing.
+//   • Phones with the app (invisible Anonymous sign-in): runs, scans and the truck list. Drivers pick their name, then a truck.
+//   • Note: anyone who opens the app link can see runs (no PIN). Not signed in at all: nothing.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -13,7 +12,8 @@ service cloud.firestore {
     function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
     function hasProfile() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
     function isAdmin() { return hasProfile() && profile().role == 'admin'; }
-    function approvedPhone() { return signedIn() && exists(/databases/$(database)/documents/devices/$(request.auth.uid)); }
+    // Any phone with the app is signed in invisibly ("Anonymous"); drivers just pick their name and truck — no PIN.
+    function approvedPhone() { return signedIn(); }
     function canSeeRuns() { return isAdmin() || approvedPhone(); }
 
     // Office accounts. Only the office can create or change them.

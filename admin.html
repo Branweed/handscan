@@ -99,9 +99,6 @@ const A = { store: null, user: undefined, profile: undefined, tab: "upload", adm
         A.unsub.t = A.store.watchTrucks(l => { A.trucksDb = l.filter(t => !String(t.id || "").startsWith("_")); A.trucksLoaded = true; seedDriverNames(); render(); }, onErr);
         // these need the new Firestore rules; until they're published, the cards say so instead of showing an error
         const needRules = k => e => { console.warn(e); A[k] = "rules"; render(); };
-        A.unsub.a = A.store.watchAccess(a => { A.access = a; render(); }, needRules("access"));
-        A.unsub.v = A.store.watchDevices(l => { A.devices = l; render(); }, needRules("devices"));
-        A.unsub.pn = A.store.watchPins(l => { A.pins = l; render(); }, e => { console.warn(e); A.pins = "rules"; render(); });
         A.unsub.n = A.store.watchDriverNames(n => { A.driverNames = n; seedDriverNames(); render(); }, needRules("driverNames"));
       }
       render();
@@ -486,11 +483,8 @@ function namesCard() {
     h("p", { class: "meta", style: { marginTop: 0 } }, "The names drivers pick from on their phone. Names on uploaded manifests are added automatically. Any driver can pick any truck."),
     list.length ? list.map(x => h("div", { class: "pkg" },
       h("div", { class: "main" }, h("div", { class: "name" }, x),
-        Array.isArray(A.pins) ? h("div", { class: "meta" }, A.pins.includes(whoKey(x)) ? "🔑 Has own PIN" : "No own PIN yet — signs in with the company PIN, then picks one") : null),
-      Array.isArray(A.pins) && A.pins.includes(whoKey(x)) ? h("button", { class: "small", onclick: async () => {
-        if (!confirm(`Reset ${x}'s PIN? They'll be signed out, then sign in once with the company PIN and pick a new one.`)) return;
-        try { await A.store.resetPin(whoKey(x)); } catch (err) { onErr(err); }
-      } }, "Reset PIN") : null,
+),
+
       h("button", { class: "small", onclick: () => {
         if (!confirm(`Take ${x} off the list?`)) return;
         A.store.setDriverNames((n || []).filter(y => personKey(y) !== personKey(x))).catch(onErr);
@@ -501,7 +495,7 @@ function namesCard() {
       const seen = mergeCrew([...A.trucksDb.flatMap(t => t.crew || []), ...A.manifests.flatMap(m => (m.driverNames || []).map(name => ({ name })))])
         .map(c => c.name).filter(x => !list.some(y => personKey(y) === personKey(x))).sort((a, b) => a.localeCompare(b));
       return seen.length ? [h("h3", null, "Removed / not on the list"),
-        h("p", { class: "meta", style: { marginTop: 0 } }, "Names from your trucks and uploaded runs. Tap Add back to put one on the list (their PIN, if they made one, still works)."),
+        h("p", { class: "meta", style: { marginTop: 0 } }, "Names from your trucks and uploaded runs. Tap Add back to put one on the list."),
         seen.map(x => h("div", { class: "pkg" }, h("div", { class: "main" }, h("div", { class: "name" }, x)),
           h("button", { class: "small", onclick: () => A.store.addDriverNames([x]).catch(onErr) }, "Add back")))] : null;
     })(),
@@ -539,7 +533,6 @@ function driversView() {
   const msg = h("div", { class: "err" });
   const codes = truckCodes();
   return h("div", null,
-    accessCard(),
     namesCard(),
     h("div", { class: "card" },
       h("h2", { class: "title", style: { marginTop: 0 } }, "Trucks"),
@@ -566,7 +559,7 @@ function driversView() {
               if (A.admins.length <= 1) { alert("Keep at least one admin."); return; }
               if (!confirm(`Remove ${x.name || "this admin"}? They won't be able to open the office page anymore. (You can add them back later with the same username and password.)`)) return;
               try { await A.store.removeAdmin(x.id); } catch (err) { onErr(err); } } }, "Remove"))),
-      h("p", { class: "meta" }, "Admins can use the driver app too: open it on the same phone or computer while signed in here, and you're signed in as yourself — no PIN.")),
+      h("p", { class: "meta" }, "Admins can use the driver app too: open it on the same phone or computer while signed in here, and you're signed in as yourself.")),
     h("form", { class: "card", onsubmit: async e => {
         e.preventDefault();
         const un = f.username.trim();
