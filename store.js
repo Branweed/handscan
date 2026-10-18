@@ -116,7 +116,17 @@ async function firebaseStore() {
     watchTrucks: (cb, err) => F.onSnapshot(F.collection(db, "trucks"), s => cb(list(s)), err),
     saveTruck: (code, { plate, nickname, crew }) => F.setDoc(F.doc(db, "trucks", code), {
       code, ...(nickname ? { nickname } : {}), ...(plate ? { plates: F.arrayUnion(plate) } : {}), ...(crew && crew.length ? { crew } : {}), updatedAt: Date.now() }, { merge: true }),
-    removeTruck: code => F.deleteDoc(F.doc(db, "trucks", code)),
+    // Removing a truck keeps a copy in trucks/_removed so the office can add it back later.
+    async removeTruck(code) {
+      const ref = F.doc(db, "trucks", code), snap = await F.getDoc(ref);
+      if (snap.exists()) await F.setDoc(F.doc(db, "trucks", "_removed"), { items: { [code]: { ...snap.data(), removedAt: Date.now() } } }, { merge: true });
+      await F.deleteDoc(ref);
+    },
+    async restoreTruck(code, data) {
+      const { removedAt, ...rest } = data || {};
+      await F.setDoc(F.doc(db, "trucks", code), { ...rest, code, updatedAt: Date.now() }, { merge: true });
+      await F.updateDoc(F.doc(db, "trucks", "_removed"), { [`items.${code}`]: F.deleteField() }).catch(() => {});
+    },
     watchAdmins: (cb, err) => F.onSnapshot(F.query(F.collection(db, "users"), F.where("role", "==", "admin")), s => cb(list(s)), err),
     // A new office admin: username + password, made with a throwaway Firebase app so you stay signed in.
     async addAdmin({ name, username, password }) {
@@ -277,6 +287,7 @@ function demoStore(role) {
     },
     async setDriver(id, patch) { Object.assign(st.users[id], patch); save(); },
     async removeTruck(code) { delete (st.trucks || {})[code]; save(); },
+    async restoreTruck(code, data) { (st.trucks ||= {})[code] = { ...(data || {}), code }; save(); },
     watchAllManifests: cb => watch(() => cb(arr(st.manifests).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)))),
     async saveManifest(m) { const id = uid("m"); st.manifests[id] = m; save(); return id; },
     async updateManifest(id, patch) { Object.assign(st.manifests[id], patch, { updatedAt: Date.now() }); save(); },

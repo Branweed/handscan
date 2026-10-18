@@ -77,7 +77,7 @@ table.res th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-s
 <main id="app"><div class="empty">Loading…</div></main>
 <script type="module">
 import { DEMO, h, swap, uid, normalizeTag, looksLikeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, plural, downloadCsv,
-  friendlyError, manifestNos, runTitle, crewNames, firstName, vehicleInfo, adminEmail, stopSets, stopManifestNos, setText, multiOrigin, boxLabel, ORIGINS, mergeCrew, personKey, whoKey, LOAD, loadSummary } from "./shared.js";
+  friendlyError, manifestNos, runTitle, crewNames, firstName, vehicleInfo, adminEmail, stopSets, stopManifestNos, setText, multiOrigin, boxLabel, ORIGINS, mergeCrew, personKey, whoKey, LOAD, loadSummary, KNOWN_TRUCKS } from "./shared.js";
 import { createStore } from "./store.js";
 
 const root = document.getElementById("app"), $ = id => document.getElementById(id);
@@ -96,7 +96,7 @@ const A = { store: null, user: undefined, profile: undefined, tab: "upload", adm
       if (p && p.role === "admin" && was !== "admin") {
         A.unsub.d = A.store.watchAdmins(l => { A.admins = l.sort((a, b) => String(a.name).localeCompare(String(b.name))); render(); }, onErr);
         A.unsub.m = A.store.watchAllManifests(l => { A.manifests = l; render(); }, onErr);
-        A.unsub.t = A.store.watchTrucks(l => { A.trucksDb = l.filter(t => !String(t.id || "").startsWith("_")); A.trucksLoaded = true; seedDriverNames(); render(); }, onErr);
+        A.unsub.t = A.store.watchTrucks(l => { A.trucksDb = l.filter(t => !String(t.id || "").startsWith("_")); A.removedTrucks = ((l.find(t => t.id === "_removed") || {}).items) || {}; A.trucksLoaded = true; seedDriverNames(); render(); }, onErr);
         // these need the new Firestore rules; until they're published, the cards say so instead of showing an error
         const needRules = k => e => { console.warn(e); A[k] = "rules"; render(); };
         A.unsub.n = A.store.watchDriverNames(n => { A.driverNames = n; seedDriverNames(); render(); }, needRules("driverNames"));
@@ -547,6 +547,18 @@ function driversView() {
           h("span", { class: "chip" }, plural(runs, "run")),
           h("button", { class: "small", onclick: () => { A.tk = { code: c, nickname: t.nickname || "", plate: (t.plates || [])[0] || "" }; render(); } }, "Edit"));
       }) : h("div", { class: "empty" }, "No trucks yet."),
+      (() => {   // trucks that were removed (or only seen on runs) — add back in one tap
+        const have = new Set(A.trucksDb.map(t => t.code || t.id)), gone = new Map();
+        for (const t of KNOWN_TRUCKS) gone.set(t.code, { nickname: t.nickname });
+        for (const m of A.manifests) if (m.truck && !gone.has(m.truck)) gone.set(m.truck, {});
+        for (const [c, d] of Object.entries(A.removedTrucks || {})) gone.set(c, { ...(gone.get(c) || {}), ...d });
+        const rows = [...gone].filter(([c]) => !have.has(c));
+        return rows.length ? [h("h3", null, "Removed / not on the list"),
+          rows.map(([c, d]) => h("div", { class: "pkg" },
+            h("div", { class: "ic", style: { width: "44px", borderRadius: "10px", fontSize: "13px" } }, c),
+            h("div", { class: "main" }, h("div", { class: "name" }, [d.nickname, (d.plates || []).length && `plate ${d.plates.join(", ")}`].filter(Boolean).join(" · ") || c)),
+            h("button", { class: "small", onclick: () => A.store.restoreTruck(c, d).catch(onErr) }, "Add back")))] : null;
+      })(),
       truckForm()),
     h("div", { class: "card" },
       h("h2", { class: "title", style: { marginTop: 0 } }, "Office admins"),
