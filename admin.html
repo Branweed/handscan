@@ -400,6 +400,12 @@ function detailView(m) {
           fin ? h("span", { class: fin.missing && fin.missing.length ? "chip warn" : "chip ok" }, `Finished ${fmtTime(fin.at)}${fin.missing && fin.missing.length ? ` · ${fin.missing.length} missing` : ""}`)
             : h("span", { class: "chip" }, `${p.matched.size}/${s.packages.length}`)),
         h("div", { class: "meta" }, [s.manifestNo && `Manifest ${s.manifestNo}`, s.invoiceNo && `WTI ${s.invoiceNo}`, s.license, s.address].filter(Boolean).join(" · ")),
+        p.matched.size ? h("button", { class: "small", style: { margin: "6px 0 2px" }, onclick: async e => {
+          const btn = e.currentTarget, tags = s.packages.filter(pk => p.matched.has(pk.tag)).map(pk => pk.tag);
+          try { await navigator.clipboard.writeText(tags.join("\n")); btn.textContent = `✓ Copied ${plural(tags.length, "tag")}`; }
+          catch (err) { btn.textContent = "Couldn't copy"; }
+          setTimeout(() => { btn.textContent = `Copy scanned tags (${tags.length})`; }, 1800);
+        } }, `Copy scanned tags (${p.matched.size})`) : null,
         h("div", { class: "res-wrap" }, h("table", { class: "res" },
           h("tr", null, ["", "Box", "Item", "Qty", "Batch", "Tag", "Scanned"].map(x => h("th", null, x))),
           s.packages.map(pk => { const sc = p.matched.get(pk.tag);

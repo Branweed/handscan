@@ -89,3 +89,5 @@ label.f>input,label.f>select{margin-top:4px}
 .boxchip{display:inline-block;background:var(--ink);color:var(--card);border-radius:8px;padding:0 8px;margin-right:8px;font-size:15px;font-weight:900;vertical-align:2px}
 .pkg .ic{font-size:13px}
 [hidden]{display:none!important}
+.result .bigbox{font-size:52px;line-height:1.05;font-weight:900;color:var(--primary);margin-top:6px;letter-spacing:-.01em}
+.result .rg b{font-size:20px}

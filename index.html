@@ -192,7 +192,8 @@ function stopView(stop) {
           infoFor(sc.tag) ? h("div", { class: "meta" }, infoFor(sc.tag).item) : null, tagNode(sc.tag))))) : null,
     h("h3", null, `To scan (${todo.length})`),
     h("div", { class: "card" }, todo.length ? todo.map(p => row(p, false)) : h("div", { class: "empty" }, "Everything at this stop is scanned. 🎉")),
-    scanned.length ? [h("h3", null, `Scanned (${scanned.length})`), h("div", { class: "card" }, scanned.map(p => row(p, true)))] : null,
+    scanned.length ? [h("h3", null, `Scanned (${scanned.length})`), h("div", { class: "card" }, scanned.map(p => row(p, true)),
+      h("button", { class: "small", style: { marginTop: "10px" }, onclick: e => copyTags(scanned.map(p => p.tag), e.currentTarget) }, `Copy scanned tags (${scanned.length})`))] : null,
     h("div", { style: { margin: "6px 0 30px" } }, done
       ? h("button", { class: "big", onclick: () => { S.store.setStopDone(m.id, stop.id, null, "in_progress"); } }, "Reopen this stop")
       : h("button", { class: todo.length ? "big" : "primary big", onclick: () => finishStop(stop, todo) }, todo.length ? `Finish stop (${todo.length} not scanned)` : "✓ Finish this stop")));
@@ -206,7 +207,8 @@ function resultCard(r) {
   return h("div", { class: `result ${R.tone}`, role: "status", "aria-live": "polite" },
     h("div", { class: "rb" }, h("div", { class: "rh" }, R.title), h("span", { class: "meta" }, fmtTime(r.at))),
     sub ? h("div", { class: "rs" }, sub) : null,
-    p ? [h("div", { class: "ri" }, p.box ? h("span", { class: "boxchip" }, `Box ${p.box}`) : null, p.item || "(no item name)"),
+    p ? [p.box ? h("div", { class: "bigbox" }, `Box # ${p.box}`) : null,
+      h("div", { class: "ri" }, p.item || "(no item name)"),
       h("div", { class: "rg" }, h("div", null, h("span", null, "Quantity / weight"), h("b", null, fmtQty(p) || "—")), h("div", null, h("span", null, "Batch"), h("b", null, p.batch || "—")))] : null,
     tagNode(r.tag));
 }
@@ -250,9 +252,17 @@ function openCamera(stop) {
       const R = RESULT[r.result], p = r.pkg;
       const per = withLocal(summarize(S.manifest, S.scans)).per[stop.id];
       return { tone: R.tone,
-        title: r.result === "wrong_stop" ? `${R.title} — ${stopLabel(r.otherStopId)}` : `${R.title}  (${per.matched.size}/${stop.packages.length})`,
-        lines: p ? [(p.box ? `Box ${p.box} · ` : "") + (p.item || "(no item name)"), [fmtQty(p), p.batch && `Batch ${p.batch}`].filter(Boolean).join(" · "), r.tag] : [r.tag] };
+        title: r.result === "wrong_stop" ? `${R.title} — ${stopLabel(r.otherStopId)}` : `${R.title}${p && p.box ? `  ·  Box # ${p.box}` : ""}  (${per.matched.size}/${stop.packages.length})`,
+        lines: p ? [p.item || "(no item name)", [fmtQty(p), p.batch && `Batch ${p.batch}`].filter(Boolean).join(" · "), r.tag] : [r.tag] };
     } });
+}
+
+// Like the old sheet tool: every scanned tag, one per line, ready to paste into Metrc.
+async function copyTags(tags, btn) {
+  const text = tags.join("\n");
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) { const t = h("textarea", { style: { position: "fixed", opacity: "0" } }, text); document.body.append(t); t.select(); try { document.execCommand("copy"); } catch (e2) {} t.remove(); }
+  if (btn) { const old = btn.textContent; btn.textContent = `✓ Copied ${plural(tags.length, "tag")}`; setTimeout(() => { btn.textContent = old; }, 1800); }
 }
 
 function finishStop(stop, todo) {
