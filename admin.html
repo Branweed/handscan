@@ -567,12 +567,11 @@ function driversView() {
           if (f.n1.length < 6) { f.msg = "The new password needs at least 6 characters."; return render(); }
           if (f.n1 !== f.n2) { f.msg = "The new passwords don't match."; return render(); }
           f.msg = "Saving…"; render();
-          try { await A.store.changePassword(f.cur, f.n1); A.pw = { msg: "✓ Password changed." }; render(); }
-          catch (err) { f.msg = /wrong-password|invalid-credential/.test(err.code || "") ? "Your current password isn't right." : /too-many/.test(err.code || "") ? "Too many tries. Wait a few minutes." : friendlyError(err); render(); }
+          try { await A.store.changePassword(f.n1); A.pw = { msg: "✓ Password changed." }; render(); }
+          catch (err) { f.msg = /requires-recent-login/.test(err.code || "") ? "For safety, Firebase only allows this soon after signing in. Sign out, sign back in, and try again right away." : /too-many/.test(err.code || "") ? "Too many tries. Wait a few minutes." : friendlyError(err); render(); }
         };
         return h("form", { onsubmit: save, style: { marginTop: "12px", maxWidth: "360px" } },
           h("h3", null, "Change my password"),
-          h("label", { class: "f" }, "Current password", h("input", { type: "password", "data-k": "pw-c", autocomplete: "current-password", value: f.cur, oninput: e => { f.cur = e.target.value; } })),
           h("label", { class: "f" }, "New password", h("input", { type: "password", "data-k": "pw-1", autocomplete: "new-password", value: f.n1, oninput: e => { f.n1 = e.target.value; } })),
           h("label", { class: "f" }, "New password again", h("input", { type: "password", "data-k": "pw-2", autocomplete: "new-password", value: f.n2, oninput: e => { f.n2 = e.target.value; } })),
           h("div", { class: "btns", style: { marginTop: "10px" } }, h("button", { class: "primary" }, "Save"),

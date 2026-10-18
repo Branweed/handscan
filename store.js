@@ -134,12 +134,8 @@ async function firebaseStore() {
         await A.signOut(secAuth);
       } finally { await appM.deleteApp(sec).catch(() => {}); }
     },
-    // An admin changes their own password (Firebase wants the current one again first).
-    async changePassword(current, next) {
-      const u = auth.currentUser;
-      await A.reauthenticateWithCredential(u, A.EmailAuthProvider.credential(u.email, current));
-      await A.updatePassword(u, next);
-    },
+    // An admin changes their own password. (Firebase only allows it if they signed in recently.)
+    changePassword: next => A.updatePassword(auth.currentUser, next),
     // Removing an admin takes away their office access (their old login no longer opens anything).
     removeAdmin: id => F.deleteDoc(F.doc(db, "users", id)),
     setDriver: (id, patch) => F.updateDoc(F.doc(db, "users", id), patch),
