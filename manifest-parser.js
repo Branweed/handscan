@@ -109,7 +109,10 @@ const ALL_LABELS = [...Object.values(LBL).map(x => x[0]), DEST_RE,
   /^(?:package|tag|lab|source|est\.?|estimated|departure|arrival|route|driver|vehicle|transporter|origin|originating|shipper|phone|manifest|date|gross|weight|price|wholesale|received|invoice|contains|item\s*details)\b/i];
 const isLabel = t => /:\s*$/.test(t) || ALL_LABELS.some(re => re.test(t) && t.replace(re, "").replace(/^[\s:#.\-]+/, "").length === 0);
 // Lines under a package that are details, not more of the item name.
-const DETAIL_LINE = /^(?:contains\s*retail|item\s*details|source\s*(?:harvest|package|production)|org\.?\s*src|lab\s*test\s*(?:result|date)|product\s*rejection|name\s*of\s*person|signature|i\s*confirm|manifest\s*no|metrc|marijuana\s*transportation|all\s*sales|reject\s*product|transfer\s*form)/i;
+// ("Contains Retail IDs" isn't listed: a long item name can wrap onto that line, e.g. "… - Sativa - | Sapura".)
+// "(Infused (edible))", "(Vape Product)": the item's category printed under its name, not part of the name.
+const CATEGORY_RE = /^\([^\d()]*(?:\([^\d()]*\))?[^\d()]*\)$/;
+const DETAIL_LINE = /^(?:item\s*details|source\s*(?:harvest|package|production)|org\.?\s*src|lab\s*test\s*(?:result|date)|product\s*rejection|name\s*of\s*person|signature|i\s*confirm|manifest\s*no|metrc|marijuana\s*transportation|all\s*sales|reject\s*product|transfer\s*form)/i;
 
 function labelValue(lines, [re, reject]) {
   for (let li = 0; li < lines.length; li++) {
@@ -303,7 +306,7 @@ export function parseLines(lines) {
     if (!tags.length) {
       if (pkg) pkgLines.push(line);
       if (tbl && !DETAIL_LINE.test(line.segs[0].t))
-        for (const s of line.segs) if (colFor(s, tbl.cols) === "item") tbl.frags.push({ t: s.t, y: line.y, page: line.page, h: line.h || 10 });
+        for (const s of line.segs) if (colFor(s, tbl.cols) === "item" && !CATEGORY_RE.test(s.t)) tbl.frags.push({ t: s.t, y: line.y, page: line.page, h: line.h || 10 });
       continue;
     }
 
