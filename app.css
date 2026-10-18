@@ -94,3 +94,7 @@ label.f>input,label.f>select{margin-top:4px}
 .result .boxfrom{font-size:18px;font-weight:800;color:var(--primary);margin:-2px 0 4px}
 .grp{font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:12px 0 2px;border-top:1px solid var(--line)}
 .grp:first-child{border-top:0;padding-top:0}
+.truckbtns{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+.truckbtns button{flex-direction:column;min-height:72px;gap:2px}
+.truckbtns button b{font-size:22px}
+.truckbtns button span{font-size:12.5px;font-weight:600;opacity:.8}

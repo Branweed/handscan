@@ -20,28 +20,32 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Office-only: driver PINs and the truck list (trucks are remembered by license plate).
+    // Trucks: drivers see the list on the sign-in screen; only the office changes it.
+    match /trucks/{code} { allow read: if true; allow write: if isAdmin(); }
     match /driverLogins/{uid} { allow read, write: if isAdmin(); }
-    match /trucks/{code} { allow read, write: if isAdmin(); }
 
     // Runs (one per truck per day, holding one or more Metrc manifests).
-    // The office does everything; a driver sees only runs sent to them and can only mark stops finished.
+    // Drivers sign in with just a truck name (no password), so runs can be read without an account.
+    // Without an account they can only mark stops finished and add scans; the office does everything else.
     match /manifests/{mid} {
-      allow read: if isAdmin() || (isDriver() && onRun(resource.data));
+      function run() { return get(/databases/$(database)/documents/manifests/$(mid)).data; }
+      allow read: if true;
       allow create, delete: if isAdmin();
       allow update: if isAdmin()
-        || (isDriver() && onRun(resource.data)
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stopsDone', 'status', 'updatedAt'])
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stopsDone', 'status', 'updatedAt'])
+            && resource.data.status in ['assigned', 'in_progress', 'done']
             && request.resource.data.status in ['assigned', 'in_progress', 'done']);
 
-      // Scans. Drivers can add (never edit or delete) scans on their own runs.
+      // Scans: anyone with the app can add one to a live run (never edit or delete); it must name that run's truck.
       match /scans/{sid} {
-        allow read: if isAdmin() || (isDriver() && ownsManifest(mid));
+        allow read: if true;
         allow create: if isAdmin()
-          || (isDriver() && ownsManifest(mid)
-              && request.resource.data.driverId == request.auth.uid
+          || (request.resource.data.keys().hasOnly(['tag', 'stopId', 'result', 'at', 'via', 'truck', 'driverName', 'otherStopId', 'raw', 'syncedAt'])
               && request.resource.data.tag is string && request.resource.data.tag.size() <= 64
-              && request.resource.data.result in ['match', 'duplicate', 'wrong_stop', 'not_on_manifest']);
+              && request.resource.data.result in ['match', 'duplicate', 'wrong_stop', 'not_on_manifest']
+              && request.resource.data.truck == run().truck
+              && run().status in ['assigned', 'in_progress', 'done']
+              && (!('driverName' in request.resource.data) || (request.resource.data.driverName is string && request.resource.data.driverName.size() <= 80)));
         allow update, delete: if isAdmin();
       }
     }

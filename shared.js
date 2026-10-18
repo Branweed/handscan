@@ -142,7 +142,11 @@ export function vehicleInfo(v) {
   const code = nick.map(w => (/^\d+$/.test(w) ? w : w[0].toUpperCase())).join("");
   return { plate, nickname: nick.join(" "), code };
 }
-// Drivers sign in with their Employee ID; behind the scenes that's this made-up email address.
+// Office admins sign in with a username ("Brandon"); behind the scenes that's this made-up email address.
+// An email address typed in full also works.
+export const ADMIN_DOMAIN = "admins.handscan.app";
+export const adminEmail = u => { const v = String(u || "").trim(); return v.includes("@") ? v : `${v.toLowerCase().replace(/[^a-z0-9._-]/g, "")}@${ADMIN_DOMAIN}`; };
+// (Older builds signed drivers in with an Employee ID; drivers now just pick their truck.)
 export const DRIVER_DOMAIN = "drivers.handscan.app";
 export const driverEmail = id => `${String(id || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "")}@${DRIVER_DOMAIN}`;
 export const makePin = () => { const a = new Uint32Array(1); crypto.getRandomValues(a); return String(100000 + (a[0] % 900000)); };

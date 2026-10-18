@@ -12,7 +12,7 @@
  *                                  each stop: { id, name, license, address, manifestNo, invoiceNo, packages[{ tag, item, qty, uom, batch, box }] }
  *   manifests/{id}/scans/{autoId}  { tag, stopId, result, at, via, driverId, driverName, otherStopId?, raw? }
  */
-import { firebaseConfig, DEMO, uid, driverEmail, makePin } from "./shared.js";
+import { firebaseConfig, DEMO, uid, driverEmail, makePin, adminEmail } from "./shared.js";
 
 export const FB_VERSION = "10.12.2";
 const FB = `https://www.gstatic.com/firebasejs/${FB_VERSION}/`;
@@ -37,7 +37,8 @@ async function firebaseStore() {
     resetPassword: email => A.sendPasswordResetEmail(auth, email.trim()),
     watchProfile: (id, cb, err) => F.onSnapshot(F.doc(db, "users", id), s => cb(one(s)), err),
 
-    // driver
+    // driver: no account, just a truck name
+    watchTruckRuns: (truck, cb, err) => F.onSnapshot(F.query(F.collection(db, "manifests"), F.where("truck", "==", truck)), s => cb(list(s)), err),
     watchMyManifests: (id, cb, err) => F.onSnapshot(F.query(F.collection(db, "manifests"), F.where("driverIds", "array-contains", id)), s => cb(list(s)), err),
     watchManifest: (id, cb, err) => F.onSnapshot(F.doc(db, "manifests", id), { includeMetadataChanges: false }, s => cb(one(s), s.metadata.fromCache), err),
     watchScans: (mid, cb, err) => F.onSnapshot(F.collection(db, "manifests", mid, "scans"), { includeMetadataChanges: true }, s => {
@@ -71,8 +72,19 @@ async function firebaseStore() {
     },
     watchLogins: (cb, err) => F.onSnapshot(F.collection(db, "driverLogins"), s => cb(list(s)), err),
     watchTrucks: (cb, err) => F.onSnapshot(F.collection(db, "trucks"), s => cb(list(s)), err),
-    saveTruck: (code, { plate, nickname }) => F.setDoc(F.doc(db, "trucks", code), {
-      code, ...(nickname ? { nickname } : {}), ...(plate ? { plates: F.arrayUnion(plate) } : {}), updatedAt: Date.now() }, { merge: true }),
+    saveTruck: (code, { plate, nickname, crew }) => F.setDoc(F.doc(db, "trucks", code), {
+      code, ...(nickname ? { nickname } : {}), ...(plate ? { plates: F.arrayUnion(plate) } : {}), ...(crew && crew.length ? { crew } : {}), updatedAt: Date.now() }, { merge: true }),
+    watchAdmins: (cb, err) => F.onSnapshot(F.query(F.collection(db, "users"), F.where("role", "==", "admin")), s => cb(list(s)), err),
+    // A new office admin: username + password, made with a throwaway Firebase app so you stay signed in.
+    async addAdmin({ name, username, password }) {
+      const sec = appM.initializeApp(firebaseConfig, "add-admin-" + Date.now());
+      try {
+        const secAuth = A.initializeAuth(sec, { persistence: A.inMemoryPersistence });
+        const cred = await A.createUserWithEmailAndPassword(secAuth, adminEmail(username), password);
+        await F.setDoc(F.doc(db, "users", cred.user.uid), { name, username, email: adminEmail(username), role: "admin", active: true, createdAt: Date.now() });
+        await A.signOut(secAuth);
+      } finally { await appM.deleteApp(sec).catch(() => {}); }
+    },
     setDriver: (id, patch) => F.updateDoc(F.doc(db, "users", id), patch),
     watchAllManifests: (cb, err) => F.onSnapshot(F.query(F.collection(db, "manifests"), F.orderBy("createdAt", "desc"), F.limit(300)), s => cb(list(s)), err),
     async saveManifest(m) { const r = await F.addDoc(F.collection(db, "manifests"), m); return r.id; },
@@ -88,7 +100,7 @@ async function firebaseStore() {
 }
 
 /* ============================== Demo (this browser only) ============================== */
-const KEY = "manifest-check-demo:v3";
+const KEY = "manifest-check-demo:v4";
 function seed() {
   const t = n => "1A4FF01000000220000" + String(n).padStart(5, "0");
   const today = new Date(); const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -99,7 +111,7 @@ function seed() {
       "demo-driver-2": { name: "Second Driver", employeeId: "DEMO2", role: "driver", active: true, truck: "T1" },
     },
     logins: { "demo-driver": { employeeId: "DEMO1", name: "Demo Driver", pin: "123456" }, "demo-driver-2": { employeeId: "DEMO2", name: "Second Driver", pin: "654321" } },
-    trucks: { T1: { code: "T1", nickname: "Demo Truck", plates: [] } },
+    trucks: { T1: { code: "T1", nickname: "Demo Truck", plates: [], crew: [{ name: "Demo Driver" }, { name: "Second Driver" }] } },
     manifests: {
       "demo-1": {
         date: iso, truck: "T1", driverIds: ["demo-driver", "demo-driver-2"], driverNames: ["Demo Driver", "Second Driver"], status: "assigned",
@@ -146,6 +158,9 @@ function demoStore(role) {
     signIn: async () => {}, signOut: async () => {}, resetPassword: async () => {},
     watchProfile: (id, cb) => watch(() => cb(st.users[id] ? { id, ...st.users[id] } : null)),
     watchMyManifests: (id, cb) => watch(() => cb(arr(st.manifests, m => (m.driverIds || []).includes(id)))),
+    watchTruckRuns: (truck, cb) => watch(() => cb(arr(st.manifests, m => m.truck === truck))),
+    watchAdmins: cb => watch(() => cb(arr(st.users, u => u.role === "admin"))),
+    async addAdmin({ name, username }) { st.users[uid("u")] = { name, username, role: "admin", active: true, createdAt: Date.now() }; save(); },
     watchManifest: (id, cb) => watch(() => cb(st.manifests[id] ? { id, ...st.manifests[id] } : null, false)),
     watchScans: (mid, cb) => watch(() => cb([...(st.scans[mid] || [])], 0)),
     addScan(mid, scan) { (st.scans[mid] ||= []).push({ id: uid("c"), ...scan }); save(); },
@@ -163,9 +178,9 @@ function demoStore(role) {
     },
     watchLogins: cb => watch(() => cb(arr(st.logins || {}))),
     watchTrucks: cb => watch(() => cb(arr(st.trucks || {}))),
-    async saveTruck(code, { plate, nickname }) {
+    async saveTruck(code, { plate, nickname, crew }) {
       const t = ((st.trucks ||= {})[code] ||= { code, plates: [] });
-      if (nickname) t.nickname = nickname; if (plate && !t.plates.includes(plate)) t.plates.push(plate); save();
+      if (nickname) t.nickname = nickname; if (plate && !t.plates.includes(plate)) t.plates.push(plate); if (crew && crew.length) t.crew = crew; save();
     },
     async setDriver(id, patch) { Object.assign(st.users[id], patch); save(); },
     watchAllManifests: cb => watch(() => cb(arr(st.manifests).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)))),
