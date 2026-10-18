@@ -10,6 +10,16 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="app.css">
 <script>
+// On a phone, the office page only opens from the "Office / Admin" button on the truck screen (it adds #office).
+// Anything else that lands here (an old home-screen icon, a bookmark, a restored tab, a pasted link) goes to the trucks.
+(function () {
+  try {
+    var phone = Math.min(screen.width, screen.height) <= 600 && (navigator.maxTouchPoints > 0 || matchMedia("(pointer: coarse)").matches);
+    if (phone && location.hash !== "#office") location.replace("./");
+  } catch (e) {}
+})();
+</script>
+<script>
 // Chrome's "Desktop site" mode lays pages out ~980px wide on a phone, so everything looks tiny.
 // On touch phones, zoom the page back to the phone's real width.
 (function () {

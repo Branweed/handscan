@@ -2,7 +2,7 @@
 
 Drivers scan each package's Metrc tag at every drop-off and the phone tells them right away whether it belongs there. It shows the item name, quantity or weight, batch and tag. It works with no signal, and the results upload to the office by themselves when the phone is back online.
 
-- **`index.html`** is the driver app. Drivers sign in, pick a manifest, pick the stop, and scan.
+- **`index.html`** is the driver app and the first screen: tap your truck (no password), pick the run and the stop, and scan. The **Office / Admin** button underneath opens the office page.
 - **`admin.html`** is the office page. You upload a truck's manifests and WTIs together, check what was read, and send the run to the truck. You can also manage drivers and trucks, and see results live.
 
 A **run** is one truck's trip. Each Metrc manifest in it is a stop, and every driver on that truck gets the run. Both drivers can scan, and they share one count.
@@ -53,8 +53,8 @@ When you upload a run, the app reads the manifest's **Name of Person Transportin
 Most orders ship as two sets: a manifest + WTI from **Fall River (MP281319)** and another from **Lakeville (MC282112)**. Upload all of a truck's files together (or use **+ Add more files** on the review screen). Every manifest for the same customer becomes **one stop**, and each box is labeled with where it came from (FR / LV), because each WTI numbers its boxes from 1. The review screen points out any customer that only has one set. To add another facility, add a line to `ORIGINS` in `shared.js`.
 
 ### Driver setup (once per phone)
-1. Open **https://branweed.github.io/handscan/** in **Chrome** and sign in with Employee ID + PIN **while connected to the internet**.
-2. Open Chrome's ⋮ menu and choose **Add to Home screen / Install app**.
+1. Open **https://branweed.github.io/handscan/** in **Chrome** **while connected to the internet** and tap your truck.
+2. On the truck screen, open Chrome's ⋮ menu and choose **Add to Home screen / Install app**. (On a phone, admin.html only opens from the Office button; any other link to it goes to the trucks.)
 3. Each morning, open the app once on Wi-Fi or data so that day's run downloads. After that it works offline all day.
 
 ---

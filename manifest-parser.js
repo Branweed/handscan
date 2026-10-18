@@ -526,6 +526,28 @@ function tagOrigin(s, r) {
   s.sets = [{ manifestNo: r.manifestNo || "", invoiceNo: r.kind === "invoice" ? r.invoiceNo || "" : "", origin: o.name || "", originShort: o.short || "", originLicense: o.license || "" }];
   s.packages.forEach(p => { p.manifestNo = r.manifestNo || ""; p.origin = o.name || ""; p.originShort = o.short || ""; });
 }
+
+// Quantities match if the numbers are equal, OR if one side is a weight and the other a count
+// that agree through the unit size in the item name: "… 3.5g" with 87.5 g on one and 25 on the other (87.5 / 3.5 = 25).
+const GRAMS_RE = /^(g|gm|gms|gram|grams)$/i;
+export function unitGrams(item) {
+  const m = String(item || "").match(/(\d+(?:\.\d+)?)\s*(mg|g|gm|gms|grams?)\b/i);
+  if (!m) return 0;
+  const n = parseFloat(m[1]);
+  return /^mg$/i.test(m[2]) ? n / 1000 : n;
+}
+export function qtyMatches(a, b) {
+  const qa = Number(a.qty), qb = Number(b.qty);
+  if (!isFinite(qa) || !isFinite(qb)) return String(a.qty) === String(b.qty);
+  if (Math.abs(qa - qb) < 1e-6) return true;
+  const ga = GRAMS_RE.test(String(a.uom || "").trim()) || /^grams$/i.test(a.uom || ""), gb = GRAMS_RE.test(String(b.uom || "").trim()) || /^grams$/i.test(b.uom || "");
+  if (ga === gb) return false;                        // both weights or both counts, and they differ
+  const size = unitGrams(a.item) || unitGrams(b.item);
+  if (!size) return false;
+  const [weight, count] = ga ? [qa, qb] : [qb, qa];
+  return Math.abs(weight / size - count) < 0.01;
+}
+
 export function combine(input) {
   const results = JSON.parse(JSON.stringify(input));       // the parsed files stay untouched, so more can be added later
   const manifests = results.filter(r => r.kind !== "invoice"), invoices = results.filter(r => r.kind === "invoice");
@@ -554,7 +576,7 @@ export function combine(input) {
       if (!p.batch && ip.batch) p.batch = ip.batch;
       else if (ip.batch && p.batch && ip.batch.toUpperCase() !== p.batch.toUpperCase()) warnings.push(`${ip.tag}: batch is ${p.batch} on the manifest but ${ip.batch} on the WTI.`);
       if (!p.item && ip.item) p.item = ip.item;
-      if (ip.qty && p.qty && Number(ip.qty) !== Number(p.qty)) warnings.push(`⚠ ${ip.tag}: quantity is ${p.qty} ${p.uom} on the manifest but ${ip.qty} ${ip.uom} on ${label(inv)}.`);
+      if (ip.qty && p.qty && !qtyMatches(p, ip)) warnings.push(`⚠ ${ip.tag}: quantity is ${p.qty} ${p.uom} on the manifest but ${ip.qty} ${ip.uom} on ${label(inv)}.`);
     }
     for (const [t, p] of byTag) if (mkey(p.manifestNo) === mkey(inv.manifestNo) && !invTags.has(t))
       warnings.push(`⚠ Manifest ${inv.manifestNo}: ${t} (${p.item || "no name"}) isn't on ${label(inv)}.`);
