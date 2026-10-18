@@ -121,3 +121,10 @@ label.f>input,label.f>select{margin-top:4px}
 @media (max-width:380px){.tcode{width:72px;height:54px;font-size:22px}.tname{font-size:17px}.truck{gap:12px;min-height:80px}}
 /* office header: keep it on one tidy line on phones */
 @media (max-width:520px){.top .who{display:none}.top h1{font-size:17px}}
+/* load check + phone setup */
+.loadcard .stopno{font-size:18px}
+.lockcard{text-align:center;padding:22px 18px}
+.lockic{font-size:40px;line-height:1}
+.lockcard .manual{max-width:340px;margin:14px auto 0}
+.codein{font-size:22px !important;letter-spacing:.2em;text-align:center;font-family:ui-monospace,Menlo,Consolas,monospace !important}
+.bigcode{font:800 22px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.15em}

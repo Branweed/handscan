@@ -11,6 +11,10 @@
  *                                  { title, date, truck, driverIds[], driverNames[], status, stops[], stopsDone{}, createdAt, updatedAt }
  *                                  each stop: { id, name, license, address, manifestNo, invoiceNo, packages[{ tag, item, qty, uom, batch, box }] }
  *   manifests/{id}/scans/{autoId}  { tag, stopId, result, at, via, driverId, driverName, otherStopId?, raw? }
+ *                                  stopId "load" = a load-check scan at the dock; stopsDone.load = load check finished
+ *   settings/access                { code }            office-only: the company code phones enter once
+ *   settings/drivers               { names[] }         the "Who are you?" list (approved phones can read it)
+ *   devices/{uid}                  { code, at, name }  one per approved phone (anonymous sign-in); the office can remove them
  */
 import { firebaseConfig, DEMO, uid, driverEmail, makePin, adminEmail } from "./shared.js";
 
@@ -36,6 +40,21 @@ async function firebaseStore() {
     signOut: () => A.signOut(auth),
     resetPassword: email => A.sendPasswordResetEmail(auth, email.trim()),
     watchProfile: (id, cb, err) => F.onSnapshot(F.doc(db, "users", id), s => cb(one(s)), err),
+
+    // ---- phones: an invisible anonymous sign-in, approved once with the company code ----
+    async ready() {
+      await auth.authStateReady();
+      if (!auth.currentUser) { try { await A.signInAnonymously(auth); } catch (e) { console.warn("anonymous sign-in unavailable", e.code || e); } }
+      return auth.currentUser;
+    },
+    async approvePhone(code, name) {
+      if (!auth.currentUser) {
+        try { await A.signInAnonymously(auth); }
+        catch (e) { const err = new Error("Phone sign-in isn't turned on yet. In Firebase: Authentication → Sign-in method → Anonymous → Enable."); err.code = "setup"; throw err; }
+      }
+      await F.setDoc(F.doc(db, "devices", auth.currentUser.uid), { code: String(code).trim(), at: Date.now(), name: String(name || "").slice(0, 80) });
+    },
+    watchDriverNames: (cb, err) => F.onSnapshot(F.doc(db, "settings", "drivers"), s => cb(s.exists() ? (s.data().names || []) : null), err),
 
     // driver: no account, just a truck name
     watchTruckRuns: (truck, cb, err) => F.onSnapshot(F.query(F.collection(db, "manifests"), F.where("truck", "==", truck)), s => cb(list(s)), err),
@@ -86,6 +105,17 @@ async function firebaseStore() {
       } finally { await appM.deleteApp(sec).catch(() => {}); }
     },
     setDriver: (id, patch) => F.updateDoc(F.doc(db, "users", id), patch),
+    // ---- office: company code, approved phones, driver list ----
+    watchAccess: (cb, err) => F.onSnapshot(F.doc(db, "settings", "access"), s => cb(s.exists() ? s.data() : null), err),
+    setAccessCode: code => F.setDoc(F.doc(db, "settings", "access"), { code: String(code).trim(), updatedAt: Date.now() }),
+    watchDevices: (cb, err) => F.onSnapshot(F.collection(db, "devices"), s => cb(list(s).sort((a, b) => (b.at || 0) - (a.at || 0))), err),
+    removeDevice: id => F.deleteDoc(F.doc(db, "devices", id)),
+    async removeAllDevices() {
+      const s = await F.getDocs(F.collection(db, "devices"));
+      for (let i = 0; i < s.docs.length; i += 400) { const b = F.writeBatch(db); s.docs.slice(i, i + 400).forEach(d => b.delete(d.ref)); await b.commit(); }
+    },
+    setDriverNames: names => F.setDoc(F.doc(db, "settings", "drivers"), { names, updatedAt: Date.now() }),
+    addDriverNames: names => F.setDoc(F.doc(db, "settings", "drivers"), { names: F.arrayUnion(...names), updatedAt: Date.now() }, { merge: true }),
     watchAllManifests: (cb, err) => F.onSnapshot(F.query(F.collection(db, "manifests"), F.orderBy("createdAt", "desc"), F.limit(300)), s => cb(list(s)), err),
     async saveManifest(m) { const r = await F.addDoc(F.collection(db, "manifests"), m); return r.id; },
     updateManifest: (id, patch) => F.updateDoc(F.doc(db, "manifests", id), { ...patch, updatedAt: Date.now() }),
@@ -156,6 +186,16 @@ function demoStore(role) {
     actAs(id) { try { localStorage.setItem(KEY + ":as", id); } catch (e) {} location.replace(location.pathname); },
     onUser(cb) { setTimeout(() => cb({ uid: me, email: st.users[me].email }), 0); return () => {}; },
     signIn: async () => {}, signOut: async () => {}, resetPassword: async () => {},
+    ready: async () => ({ uid: me }),
+    async approvePhone(code, name) { (st.devices ||= {})[me] = { code, at: Date.now(), name }; save(); },
+    watchDriverNames: cb => watch(() => cb(st.settings && st.settings.drivers ? st.settings.drivers.names : null)),
+    watchAccess: cb => watch(() => cb(st.settings && st.settings.access || null)),
+    async setAccessCode(code) { ((st.settings ||= {}).access = { code }); save(); },
+    watchDevices: cb => watch(() => cb(arr(st.devices || {}))),
+    async removeDevice(id) { delete (st.devices || {})[id]; save(); },
+    async removeAllDevices() { st.devices = {}; save(); },
+    async setDriverNames(names) { ((st.settings ||= {}).drivers = { names }); save(); },
+    async addDriverNames(names) { const d = ((st.settings ||= {}).drivers ||= { names: [] }); for (const n of names) if (!d.names.includes(n)) d.names.push(n); save(); },
     watchProfile: (id, cb) => watch(() => cb(st.users[id] ? { id, ...st.users[id] } : null)),
     watchMyManifests: (id, cb) => watch(() => cb(arr(st.manifests, m => (m.driverIds || []).includes(id)))),
     watchTruckRuns: (truck, cb) => watch(() => cb(arr(st.manifests, m => m.truck === truck))),

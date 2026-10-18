@@ -50,6 +50,8 @@
 .prow input.badtag{border-color:var(--bad);background:var(--bad-bg)}
 .prow.head{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
 .prow button{min-height:38px;width:38px;padding:0}
+.loadline{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--field);border:1px solid var(--line);font-size:14.5px}
+.loadline .meta{margin-top:4px}
 @media (max-width:760px){.prow{grid-template-columns:.4fr .6fr 1fr 1fr}.prow .t,.prow .it{grid-column:1/-1}.prow.head{display:none}.prow{border-top:1px solid var(--line);padding:10px 0}}
 .stopcard>.grid2{margin:10px 0}
 .warnlist{margin:8px 0 0;padding-left:20px;color:var(--warn);font-size:14px}
@@ -75,25 +77,31 @@ table.res th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-s
 <main id="app"><div class="empty">Loading…</div></main>
 <script type="module">
 import { DEMO, h, swap, uid, normalizeTag, looksLikeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, plural, downloadCsv,
-  friendlyError, manifestNos, runTitle, crewNames, firstName, vehicleInfo, adminEmail, stopSets, stopManifestNos, setText, multiOrigin, boxLabel, ORIGINS, mergeCrew } from "./shared.js";
+  friendlyError, manifestNos, runTitle, crewNames, firstName, vehicleInfo, adminEmail, stopSets, stopManifestNos, setText, multiOrigin, boxLabel, ORIGINS, mergeCrew, personKey, LOAD, loadSummary } from "./shared.js";
 import { createStore } from "./store.js";
 
 const root = document.getElementById("app"), $ = id => document.getElementById(id);
 const A = { store: null, user: undefined, profile: undefined, tab: "upload", admins: [], manifests: [], draft: null, busy: "", error: "",
-  openId: null, openScans: [], showArchived: false, showRaw: false, newAdmin: null, trucksDb: [], unsub: {} };
+  openId: null, openScans: [], showArchived: false, showRaw: false, newAdmin: null, trucksDb: [], unsub: {},
+  access: undefined, devices: [], driverNames: undefined, trucksLoaded: false, seeded: false, accDraft: "", nameDraft: "" };
 
 (async () => {
   try { A.store = await createStore("admin"); }
   catch (e) { swap(root, h("div", { class: "card empty" }, "Couldn't load. Check your internet connection and reload.")); return; }
   A.store.onUser(u => {
     Object.values(A.unsub).forEach(f => f && f()); A.unsub = {};
-    A.user = u || null; A.profile = undefined;
-    if (u) A.unsub.p = A.store.watchProfile(u.uid, p => {
+    A.user = u && !u.isAnonymous ? u : null; A.profile = undefined;
+    if (A.user) A.unsub.p = A.store.watchProfile(u.uid, p => {
       const was = A.profile && A.profile.role; A.profile = p;
       if (p && p.role === "admin" && was !== "admin") {
         A.unsub.d = A.store.watchAdmins(l => { A.admins = l.sort((a, b) => String(a.name).localeCompare(String(b.name))); render(); }, onErr);
         A.unsub.m = A.store.watchAllManifests(l => { A.manifests = l; render(); }, onErr);
-        A.unsub.t = A.store.watchTrucks(l => { A.trucksDb = l; render(); }, onErr);
+        A.unsub.t = A.store.watchTrucks(l => { A.trucksDb = l; A.trucksLoaded = true; seedDriverNames(); render(); }, onErr);
+        // these need the new Firestore rules; until they're published, the cards say so instead of showing an error
+        const needRules = k => e => { console.warn(e); A[k] = "rules"; render(); };
+        A.unsub.a = A.store.watchAccess(a => { A.access = a; render(); }, needRules("access"));
+        A.unsub.v = A.store.watchDevices(l => { A.devices = l; render(); }, needRules("devices"));
+        A.unsub.n = A.store.watchDriverNames(n => { A.driverNames = n; seedDriverNames(); render(); }, needRules("driverNames"));
       }
       render();
     }, onErr);
@@ -121,7 +129,7 @@ function render() {
   swap(root, h("div", null,
     A.store.demo ? h("div", { class: "banner" }, "Demo mode: data stays in this browser. Open the driver app (index.html) in another tab of this same browser to see runs you send. Add your Firebase config in shared.js to go live.") : null,
     A.error ? h("div", { class: "banner bad" }, A.error, h("button", { class: "small", onclick: () => { A.error = ""; render(); } }, "OK")) : null,
-    h("div", { class: "tabs" }, [["upload", "Upload"], ["manifests", `Runs (${A.manifests.filter(m => m.status !== "archived").length})`], ["drivers", "Trucks & admins"]]
+    h("div", { class: "tabs" }, [["upload", "Upload"], ["manifests", `Runs (${A.manifests.filter(m => m.status !== "archived").length})`], ["drivers", "Trucks & phones"]]
       .map(([k, t]) => h("button", { class: A.tab === k ? "on" : "", onclick: () => { A.tab = k; render(); } }, t))),
     A.tab === "upload" ? uploadView() : A.tab === "manifests" ? manifestsView() : driversView()));
 }
@@ -309,6 +317,7 @@ async function saveDraft() {
   m.title = [m.truck, fmtDate(m.date)].filter(Boolean).join(" · ");
   A.busy = "Sending…"; render();
   try {
+    if (crew.length && A.driverNames !== "rules") A.store.addDriverNames(mergeCrew(crew).map(c => c.name)).catch(e => console.warn(e));
     if (d.plate || d.nickname || crew.length) await A.store.saveTruck(truck, { plate: d.plate, nickname: d.nickname, crew: mergeCrew(crew).map(c => ({ name: c.name, employeeId: c.employeeId || "" })) });
     const id = await A.store.saveManifest(m);
     A.draft = null; A.tab = "manifests"; openManifest(id);
@@ -354,6 +363,7 @@ function detailView(m) {
     h("div", { class: "rb", style: { marginTop: "8px" } }, h("b", null, `${sum.done} of ${plural(sum.total, "package")} scanned`),
       issuesAll ? h("span", { class: "chip bad" }, plural(issuesAll, "problem scan")) : statusChip(m)),
     h("div", { class: "bar" }, h("i", { style: { width: `${sum.total ? (sum.done / sum.total) * 100 : 0}%` } })),
+    loadLine(m),
     h("div", { class: "grid2", style: { marginTop: "12px" } },
       h("label", { class: "f" }, "Truck", h("input", { value: m.truck || "", list: "trucklist", style: { textTransform: "uppercase" }, onchange: async e => {
           const t = e.target.value.trim().toUpperCase(); if (!t || t === m.truck) return;
@@ -394,6 +404,16 @@ function detailView(m) {
             h("td", null, tagNode(x.tag)), h("td", { class: "meta" }, who(x)))))));
     }));
 }
+function loadLine(m) {
+  const L = loadSummary(m, A.openScans), d = L.done, miss = d ? (d.missing || []) : [];
+  const info = t => { const x = L.byTag.get(t); return x ? `${x.index + 1}. ${x.stop.name}: ${boxLabel(x.pkg, multiOrigin(x.stop)) || ""} ${x.pkg.item || ""}`.trim() : t; };
+  return h("div", { class: "loadline" },
+    h("div", { class: "rb" }, h("span", null, "📦 ", h("b", null, "Load check: "), L.loaded.size || d ? `${L.loaded.size} of ${L.total} loaded` : "not started"),
+      d ? h("span", { class: miss.length ? "chip warn" : "chip ok" }, `Finished ${fmtTime(d.at)}${d.by ? ` · ${firstName(d.by)}` : ""}${miss.length ? ` · ${miss.length} not loaded` : ""}`)
+        : L.loaded.size ? h("span", { class: "chip" }, "In progress") : null),
+    miss.length ? h("div", { class: "meta" }, "Not loaded: ", miss.map(info).join(" · ")) : null,
+    L.extras.length ? h("div", { class: "meta", style: { color: "var(--bad)" } }, `Scanned at the dock but not on this run: ${L.extras.map(x => x.tag).join(", ")}`) : null);
+}
 function exportResults(m, sum) {
   const rows = [["Run", "Date", "Truck", "Drivers", "Stop #", "Stop", "License", "From", "Manifest #", "WTI #", "Box", "Tag", "Item", "Qty", "Unit", "Batch", "Result", "Scanned at", "Scanned by", "Stop finished at"]];
   (m.stops || []).forEach((s, i) => {
@@ -410,21 +430,86 @@ function exportResults(m, sum) {
 }
 
 /* ======================= trucks + admins ======================= */
+// First time only: start the "Who are you?" list from the crews already seen on the trucks.
+function seedDriverNames() {
+  if (A.seeded || A.driverNames !== null || !A.trucksLoaded) return;
+  A.seeded = true;
+  const names = mergeCrew(A.trucksDb.flatMap(t => t.crew || [])).map(c => c.name);
+  if (names.length) A.store.setDriverNames(names).catch(e => console.warn(e));
+}
+const rulesNote = () => h("div", { class: "banner bad" }, "Publish the new Firestore rules first (Firebase console → Firestore Database → Rules → paste firestore.rules → Publish), then reload this page.");
+function accessCard() {
+  const a = A.access, has = a && a !== "rules" && a.code;
+  const save = async e => {
+    e.preventDefault();
+    const code = A.accDraft.trim();
+    if (!/^\d{4,8}$/.test(code)) { alert("Use 4 to 8 digits."); return; }
+    if (has && !confirm(`Change the company code to ${code}? Phones already set up keep working. To make every phone enter the new code, use "Remove all phones".`)) return;
+    try { await A.store.setAccessCode(code); A.accDraft = ""; render(); } catch (err) { onErr(err); }
+  };
+  return h("div", { class: "card" },
+    h("h2", { class: "title", style: { marginTop: 0 } }, "Phone access"),
+    h("p", { class: "meta", style: { marginTop: 0 } }, "Each phone enters this code once to see runs. Anyone without it sees nothing, even with the link."),
+    a === "rules" || A.devices === "rules" ? rulesNote()
+      : a === undefined ? h("div", { class: "meta" }, "Loading…")
+      : has ? h("div", null, "Company code: ", h("span", { class: "bigcode" }, a.code))
+      : h("div", { class: "banner" }, "No code set yet. Phones can't be set up until you set one."),
+    a === "rules" ? null : h("form", { class: "manual", style: { maxWidth: "360px" }, onsubmit: save },
+      h("input", { "data-k": "acc", value: A.accDraft, inputmode: "numeric", placeholder: has ? "New code (4–8 digits)" : "4–8 digits", oninput: e => { A.accDraft = e.target.value; } }),
+      h("button", { class: "primary" }, has ? "Change" : "Set code")),
+    Array.isArray(A.devices) ? [
+      h("h3", null, `Phones set up (${A.devices.length})`),
+      A.devices.length ? A.devices.map(d => h("div", { class: "pkg" },
+        h("div", { class: "ic" }, "📱"),
+        h("div", { class: "main" }, h("div", { class: "name" }, d.name || "Phone"), h("div", { class: "meta" }, d.at ? `Set up ${new Date(d.at).toLocaleString()}` : "")),
+        h("button", { class: "small", onclick: () => { if (confirm("Remove this phone? It will need the code again.")) A.store.removeDevice(d.id).catch(onErr); } }, "Remove")))
+        : h("div", { class: "meta" }, "None yet."),
+      A.devices.length ? h("button", { class: "small danger", style: { marginTop: "10px" }, onclick: async () => {
+        if (!confirm(`Remove all ${A.devices.length} phones? Every phone will have to enter the code again.`)) return;
+        try { await A.store.removeAllDevices(); } catch (err) { onErr(err); }
+      } }, "Remove all phones") : null] : null);
+}
+function namesCard() {
+  const n = A.driverNames;
+  if (n === "rules") return h("div", { class: "card" }, h("h2", { class: "title", style: { marginTop: 0 } }, "Drivers"), rulesNote());
+  const list = Array.isArray(n) ? mergeCrew(n.map(name => ({ name }))).map(c => c.name).sort((a, b) => a.localeCompare(b)) : [];
+  const add = async e => {
+    e.preventDefault();
+    const v = A.nameDraft.trim().replace(/\s+/g, " ");
+    if (!v) return;
+    if (list.some(x => personKey(x) === personKey(v))) { alert(`${v} is already on the list.`); return; }
+    try { await A.store.addDriverNames([v]); A.nameDraft = ""; render(); } catch (err) { onErr(err); }
+  };
+  return h("div", { class: "card" },
+    h("h2", { class: "title", style: { marginTop: 0 } }, "Drivers"),
+    h("p", { class: "meta", style: { marginTop: 0 } }, "The names drivers pick from on their phone. Names on uploaded manifests are added automatically. Any driver can pick any truck."),
+    list.length ? list.map(x => h("div", { class: "pkg" },
+      h("div", { class: "main" }, h("div", { class: "name" }, x)),
+      h("button", { class: "small", onclick: () => {
+        if (!confirm(`Take ${x} off the list?`)) return;
+        A.store.setDriverNames((n || []).filter(y => personKey(y) !== personKey(x))).catch(onErr);
+      } }, "Remove"))) : h("div", { class: "meta" }, n === undefined ? "Loading…" : "No names yet."),
+    h("form", { class: "manual", style: { maxWidth: "460px" }, onsubmit: add },
+      h("input", { "data-k": "nm", value: A.nameDraft, placeholder: "Full name, e.g. James Jorge", style: { textTransform: "none", fontFamily: "inherit" }, oninput: e => { A.nameDraft = e.target.value; } }),
+      h("button", null, "Add")));
+}
 function driversView() {
   const f = A.newAdmin ||= { name: "", username: "", password: "" };
   const msg = h("div", { class: "err" });
   const codes = truckCodes();
   return h("div", null,
+    accessCard(),
+    namesCard(),
     h("div", { class: "card" },
       h("h2", { class: "title", style: { marginTop: 0 } }, "Trucks"),
-      h("p", { class: "meta", style: { marginTop: 0 } }, "Drivers open the app and tap their truck. No passwords. Trucks and crews are picked up from the manifests you upload."),
+      h("p", { class: "meta", style: { marginTop: 0 } }, "Trucks are picked up from the manifests you upload. Drivers pick their name, then the truck they're on today."),
       codes.length ? codes.map(c => {
         const t = A.trucksDb.find(x => x.code === c) || {}, runs = A.manifests.filter(m => m.truck === c && m.status !== "archived").length;
         return h("div", { class: "pkg" },
           h("div", { class: "ic", style: { width: "44px", borderRadius: "10px", fontSize: "13px" } }, c),
           h("div", { class: "main" },
             h("div", { class: "name" }, [t.nickname, (t.plates || []).length && `plate ${t.plates.join(", ")}`].filter(Boolean).join(" · ") || c),
-            h("div", { class: "meta" }, (t.crew || []).length ? `Crew: ${mergeCrew(t.crew).map(x => x.name).join(", ")}` : "No crew seen yet")),
+            h("div", { class: "meta" }, (t.crew || []).length ? `Last crew: ${mergeCrew(t.crew).map(x => x.name).join(", ")}` : "No crew seen yet")),
           h("span", { class: "chip" }, plural(runs, "run")));
       }) : h("div", { class: "empty" }, "No trucks yet. They appear after you send the first run.")),
     h("div", { class: "card" },

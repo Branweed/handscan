@@ -134,9 +134,10 @@ export const firstName = n => String(n || "").trim().split(/\s+/)[0];
 /* ---------------- trucks + driver logins ---------------- */
 // The trucks shown as big buttons on the driver app's first screen (more are added as runs are sent to them).
 export const KNOWN_TRUCKS = [
-  { code: "W99", nickname: "White 99", crew: [{ name: "John Gomes" }, { name: "James M. Stewart" }] },
-  { code: "BW", nickname: "Berry White", crew: [{ name: "Julio Tavares" }, { name: "Jesse M. Cort" }] },
-  { code: "WW", nickname: "White Widow", crew: [{ name: "James Jorge" }, { name: "Giovanni Alberto San Inocencio" }] },
+  { code: "W99", nickname: "White 99" },
+  { code: "BW", nickname: "Berry White" },
+  { code: "WW", nickname: "White Widow" },
+  // Driver names are NOT kept here (this code is public). They live in the database: Office → Trucks & drivers.
 ];
 // One person = one entry: "James M. Stewart", "James Stewart" and "JAMES STEWART" all match (first + last name, middle initials ignored),
 // and so does the same Employee ID. Keeps the fullest name and any ID seen.
@@ -172,6 +173,19 @@ export const adminEmail = u => { const v = String(u || "").trim(); return v.incl
 export const DRIVER_DOMAIN = "drivers.handscan.app";
 export const driverEmail = id => `${String(id || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "")}@${DRIVER_DOMAIN}`;
 export const makePin = () => { const a = new Uint32Array(1); crypto.getRandomValues(a); return String(100000 + (a[0] % 900000)); };
+/* ---------------- load check: every box scanned onto the truck before it leaves ---------------- */
+// Load-check scans are ordinary scans with stopId "load", so the delivery counts above never see them.
+export const LOAD = "load";
+export function loadSummary(m, scans = [], localTags = null) {
+  const byTag = new Map(), loaded = new Map(), extras = new Map();
+  (m.stops || []).forEach((s, i) => (s.packages || []).forEach(p => { if (!byTag.has(p.tag)) byTag.set(p.tag, { stop: s, pkg: p, index: i }); }));
+  for (const sc of scans) if (sc.stopId === LOAD) {
+    if (sc.result === "match" && byTag.has(sc.tag)) { if (!loaded.has(sc.tag)) loaded.set(sc.tag, sc); }
+    else if (sc.result === "not_on_manifest") extras.set(sc.tag, sc);
+  }
+  if (localTags) for (const t of localTags) if (byTag.has(t) && !loaded.has(t)) loaded.set(t, { tag: t });
+  return { byTag, loaded, extras: [...extras.values()], total: byTag.size, done: (m.stopsDone || {})[LOAD] || null };
+}
 export const packageCount = m => (m.stops || []).reduce((n, s) => n + (s.packages || []).length, 0);
 export const stopIsDone = (m, id) => !!(m.stopsDone && m.stopsDone[id]);
 

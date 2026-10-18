@@ -35,14 +35,14 @@
 <main id="app"><div class="empty">Loading…</div></main>
 <script type="module">
 import { DEMO, h, swap, normalizeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, RESULT, plural, friendlyError,
-  runTitle, manifestNos, crewNames, firstName, stopSets, setText, multiOrigin, boxLabel, KNOWN_TRUCKS, mergeCrew, personKey } from "./shared.js";
+  runTitle, manifestNos, crewNames, firstName, stopSets, setText, multiOrigin, boxLabel, KNOWN_TRUCKS, mergeCrew, personKey, LOAD, loadSummary } from "./shared.js";
 import { createStore } from "./store.js";
 import { scanMany, signal } from "./barcode-scanner.js";
 
 const root = document.getElementById("app"), $ = id => document.getElementById(id);
 // Formats Metrc tags and company labels are printed in. QR codes are read even if they hold a URL around the tag.
 const FORMATS = ["code_128", "qr_code", "data_matrix", "code_39", "pdf417"];
-const S = { store: null, driver: undefined, trucks: [], pick: "", pickName: "", manifests: [], error: "",
+const S = { store: null, driver: undefined, trucks: [], driverNames: null, locked: false, unlockMsg: "", unlockCode: "", pick: "", pickName: "", manifests: [], error: "",
   mid: null, manifest: undefined, scans: [], pending: 0, local: new Map(), last: null, code: "", unsub: {} };
 
 /* ---------------- start up ---------------- */
@@ -54,9 +54,9 @@ const crewCount = m => (m.driverNames || []).length;
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 (async () => {
-  try { S.store = await createStore("driver"); }
+  try { S.store = await createStore("driver"); await S.store.ready(); }
   catch (e) { swap(root, h("div", { class: "card empty" }, "Couldn't start the app. Connect to the internet once and reload — after that it works offline.")); return; }
-  S.unsub.trucks = S.store.watchTrucks(l => { S.trucks = l; if (!S.driver) render(); }, () => {});
+  startWatching();
   const saved = loadDriver();
   if (saved) { S.pickName = saved.name || ""; S.lastTruck = saved.truck || ""; }
   // Opening the app always starts on the truck buttons. Only a link straight into a run (e.g. a reload mid-stop) skips them.
@@ -75,7 +75,45 @@ function setDriver(d) {
   if (S.driver) { S.unsub.list = S.store.watchTruckRuns(S.driver.truck, l => { S.manifests = l; render(); }, onErr); followRoute(); }
   render();
 }
-function onErr(e) { console.warn(e); S.error = friendlyError(e); render(); }
+function onErr(e) { if (isLockedErr(e)) return lockPhone(); console.warn(e); S.error = friendlyError(e); render(); }
+
+/* ---------------- this phone's access: approved once with the company code ---------------- */
+const isLockedErr = e => !!e && (e.code === "permission-denied" || /permission/i.test(e.message || ""));
+function lockPhone() { if (!S.locked) { S.locked = true; render(); } }
+function startWatching() {
+  ["trucks", "names"].forEach(k => { S.unsub[k] && S.unsub[k](); S.unsub[k] = null; });
+  S.unsub.trucks = S.store.watchTrucks(l => { S.trucks = l; S.locked = false; if (!S.driver) render(); }, e => isLockedErr(e) ? lockPhone() : console.warn(e));
+  S.unsub.names = S.store.watchDriverNames(n => { S.driverNames = n; if (!S.driver) render(); }, () => {});
+}
+async function unlock(e) {
+  e.preventDefault();
+  const code = S.unlockCode.trim();
+  if (!code) { S.unlockMsg = "Type the code from the office."; return render(); }
+  if (!navigator.onLine) { S.unlockMsg = "Connect to the internet to unlock this phone (only needed once)."; return render(); }
+  S.unlockMsg = "Checking…"; render();
+  try {
+    await Promise.race([S.store.approvePhone(code, S.pickName), new Promise((_, rej) => setTimeout(() => rej(new Error("slow")), 15000))]);
+    Object.assign(S, { locked: false, unlockMsg: "", unlockCode: "", error: "" });
+    startWatching(); setDriver(S.driver);
+  } catch (err) {
+    S.unlockMsg = err.code === "setup" ? err.message : isLockedErr(err) ? "That code isn't right. Check with the office." : err.message === "slow" ? "No answer — check your signal and try again." : friendlyError(err);
+    render();
+  }
+}
+function lockView() {
+  return h("div", { class: "pick" },
+    h("div", { class: "card lockcard" },
+      h("div", { class: "lockic" }, "🔒"),
+      h("h2", { class: "pick-q", style: { marginTop: "4px" } }, "Set up this phone"),
+      h("p", { class: "meta", style: { marginTop: 0 } }, "Enter the company code from the office. You only do this once on each phone."),
+      h("form", { class: "manual", onsubmit: unlock },
+        h("input", { "data-k": "unlock", value: S.unlockCode, inputmode: "numeric", autocomplete: "one-time-code", placeholder: "Company code", class: "codein",
+          oninput: e => { S.unlockCode = e.target.value; } }),
+        h("button", { class: "primary" }, "Unlock")),
+      S.unlockMsg ? h("div", { class: S.unlockMsg === "Checking…" ? "hint" : "err", style: { marginTop: "10px" } }, S.unlockMsg) : null),
+    h("div", { class: "pick-sep" }),
+    h("a", { class: "btn big office", href: "admin.html#office" }, "🔒  Office / Admin"));
+}
 
 function route() {
   const m = location.hash.match(/^#\/m\/([^/]+)(?:\/s\/([^/]+))?/);
@@ -99,6 +137,7 @@ function render() {
   $("menu").hidden = !S.driver;
   $("menu").textContent = "Trucks";
   if (S.driver === undefined) return;
+  if (S.locked) { $("menu").hidden = true; return swap(root, lockView()); }
   if (!S.driver) return swap(root, loginView());
   swap(root, h("div", null,
     S.store.demo ? h("div", { class: "banner" }, "Demo mode: data stays on this device. Tap a package to pretend-scan it. ",
@@ -112,6 +151,7 @@ function body() {
   if (S.manifest === undefined) return h("div", { class: "empty" }, "Loading…");
   if (S.manifest === null) return h("div", null, h("a", { class: "back", href: "#/" }, "← All runs"),
     h("div", { class: "card empty" }, "This run isn't on this phone. Connect to the internet and open it again."));
+  if (r.sid === LOAD) return loadView();
   const stop = r.sid && (S.manifest.stops || []).find(s => s.id === r.sid);
   return stop ? stopView(stop) : manifestView();
 }
@@ -124,7 +164,8 @@ function loginView() {
   const trucks = [...byCode.values()].sort((a, b) => order(a.code) - order(b.code) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
   const start = code => { const c = String(code || "").trim().toUpperCase(); if (c) setDriver({ truck: c, name: S.pickName.trim() }); };
   // one plain A–Z list of every driver; which truck they're in today is picked separately below
-  const people = mergeCrew(trucks.flatMap(t => t.crew || [])).map(c => c.name).sort((a, b) => a.localeCompare(b));
+  const source = S.driverNames && S.driverNames.length ? S.driverNames.map(name => ({ name })) : trucks.flatMap(t => t.crew || []);
+  const people = mergeCrew(source).map(c => c.name).sort((a, b) => a.localeCompare(b));
   const me = personKey(S.pickName), listed = people.some(n => personKey(n) === me);
   const nameSel = h("select", { "data-k": "dname", class: "namesel", onchange: e => { S.pickName = e.target.value; render(); } },
     h("option", { value: "", selected: !S.pickName }, "Choose your name…"),
@@ -180,6 +221,7 @@ function manifestView() {
       h("div", { class: "meta" }, `${sum.done} of ${plural(sum.total, "package")} scanned`),
       h("div", { class: "bar" }, h("i", { style: { width: `${sum.total ? (sum.done / sum.total) * 100 : 0}%` } })),
       S.pending ? h("div", { class: "hint" }, `${plural(S.pending, "scan")} waiting to upload. They'll send by themselves when you're back online.`) : null),
+    loadCard(m),
     (m.stops || []).map((s, i) => {
       const p = sum.per[s.id], n = s.packages.length, got = p.matched.size, done = stopIsDone(m, s.id), issues = uniqIssues(p.issues).length;
       return h("a", { class: "card" + (done ? " stop-done" : ""), href: `#/m/${encodeURIComponent(m.id)}/s/${encodeURIComponent(s.id)}` },
@@ -245,15 +287,17 @@ function stopView(stop) {
 }
 
 function resultCard(r) {
-  const R = RESULT[r.result], p = r.pkg;
-  const sub = r.result === "wrong_stop" ? `This package is for ${stopLabel(r.otherStopId)}. Don't leave it here.`
+  const R = RESULT[r.result], p = r.pkg, isLoad = r.stopId === LOAD;
+  const title = !isLoad ? R.title : r.result === "match" ? "✓ Loaded" : r.result === "duplicate" ? "Already loaded" : "✗ Not on this run";
+  const sub = isLoad ? (r.result === "match" ? `For ${stopLabel(r.forStopId)}` : r.result === "duplicate" ? "This package was already counted as loaded." : "This tag isn't on this run. Don't load it.")
+    : r.result === "wrong_stop" ? `This package is for ${stopLabel(r.otherStopId)}. Don't leave it here.`
     : r.result === "not_on_manifest" ? "This tag isn't on this manifest. Don't leave it here."
     : r.result === "duplicate" ? "This package was already counted." : "";
   return h("div", { class: `result ${R.tone}`, role: "status", "aria-live": "polite" },
-    h("div", { class: "rb" }, h("div", { class: "rh" }, R.title), h("span", { class: "meta" }, fmtTime(r.at))),
+    h("div", { class: "rb" }, h("div", { class: "rh" }, title), h("span", { class: "meta" }, fmtTime(r.at))),
     sub ? h("div", { class: "rs" }, sub) : null,
     p ? [p.box ? h("div", { class: "bigbox" }, `Box # ${p.box}`) : null,
-      p.box && p.origin && S.manifest && (S.manifest.stops || []).some(s => s.id === r.stopId && multiOrigin(s)) ? h("div", { class: "boxfrom" }, `from ${p.origin}`) : null,
+      p.box && p.origin && S.manifest && (S.manifest.stops || []).some(s => s.id === (r.forStopId || r.stopId) && multiOrigin(s)) ? h("div", { class: "boxfrom" }, `from ${p.origin}`) : null,
       h("div", { class: "ri" }, p.item || "(no item name)"),
       h("div", { class: "rg" }, h("div", null, h("span", null, "Quantity / weight"), h("b", null, fmtQty(p) || "—")), h("div", null, h("span", null, "Batch"), h("b", null, p.batch || "—")))] : null,
     tagNode(r.tag));
@@ -263,6 +307,7 @@ function resultCard(r) {
 function handleCode(raw, stopId, via, fromCamera = false) {
   const m = S.manifest; if (!m || !S.driver) return null;
   const tag = normalizeTag(raw); if (!tag) return null;
+  if (stopId === LOAD) return handleLoad(m, tag, raw, via, fromCamera);
   const sum = withLocal(summarize(m, S.scans)), hit = sum.byTag.get(tag);
   let local = S.local.get(stopId); if (!local) S.local.set(stopId, local = new Set());
   let result;
@@ -316,6 +361,85 @@ function finishStop(stop, todo) {
   const m = S.manifest, doneNow = { ...(m.stopsDone || {}), [stop.id]: true };
   const all = m.stops.every(s => doneNow[s.id]);
   S.store.setStopDone(m.id, stop.id, { at: Date.now(), missing: todo.map(p => p.tag), by: S.driver.name || S.driver.truck }, all ? "done" : "in_progress");
+  S.last = null;
+  location.hash = `#/m/${encodeURIComponent(m.id)}`;
+}
+
+/* ---------------- load check: scan every package onto the truck before it leaves ---------------- */
+function loadCard(m) {
+  const L = loadSummary(m, S.scans, S.local.get(LOAD)), n = L.loaded.size, miss = L.done && (L.done.missing || []).length;
+  return h("a", { class: "card loadcard" + (L.done ? " stop-done" : ""), href: `#/m/${encodeURIComponent(m.id)}/s/${LOAD}` },
+    h("div", { style: { display: "flex", gap: "12px", alignItems: "center" } },
+      h("div", { class: "stopno" }, L.done ? "✓" : "📦"),
+      h("div", { style: { flex: 1, minWidth: 0 } },
+        h("div", { class: "rb" }, h("b", null, "Load check"),
+          L.done ? h("span", { class: miss ? "chip warn" : "chip ok" }, miss ? `${miss} not loaded` : "All loaded") : h("span", { class: "chip" }, `${n}/${L.total}`)),
+        h("div", { class: "meta" }, L.done ? `Finished ${fmtTime(L.done.at)}${L.done.by ? ` by ${firstName(L.done.by)}` : ""}` : "Before you leave: scan every package onto the truck."))),
+    h("div", { class: "bar" }, h("i", { style: { width: `${L.total ? (n / L.total) * 100 : 0}%` } })));
+}
+function loadView() {
+  const m = S.manifest, L = loadSummary(m, S.scans, S.local.get(LOAD));
+  const left = (m.stops || []).map((s, i) => ({ s, i, list: s.packages.filter(p => !L.loaded.has(p.tag)) })).filter(x => x.list.length);
+  const nLeft = L.total - L.loaded.size;
+  const row = (p, s) => h("div", { class: "pkg" + (S.store.demo ? " tapme" : ""), onclick: S.store.demo ? () => handleCode(p.tag, LOAD, "tap") : null },
+    h("div", { class: "ic" }, p.box || ""),
+    h("div", { class: "main" }, h("div", { class: "name" }, p.item || "(no item name)"),
+      h("div", { class: "meta" }, [boxLabel(p, multiOrigin(s)), fmtQty(p)].filter(Boolean).join(" · ")), tagNode(p.tag)));
+  return h("div", null,
+    h("a", { class: "back", href: `#/m/${encodeURIComponent(m.id)}` }, `← ${runTitle(m)}`),
+    h("div", { class: "card" },
+      h("div", { class: "meta" }, "At the dock, before the truck leaves"),
+      h("div", { style: { fontSize: "20px", fontWeight: 800 } }, "📦 Load check"),
+      h("div", { class: "rb", style: { marginTop: "8px" } }, h("b", null, `${L.loaded.size} of ${plural(L.total, "package")} loaded`),
+        L.done ? h("span", { class: "chip ok" }, "Finished") : null),
+      h("div", { class: "bar" }, h("i", { style: { width: `${L.total ? (L.loaded.size / L.total) * 100 : 0}%` } })),
+      h("div", { style: { marginTop: "14px" } }, h("button", { class: "primary big", onclick: openLoadCamera }, "📷  Scan packages")),
+      h("form", { class: "manual", onsubmit: e => { e.preventDefault(); if (S.code.trim()) { handleCode(S.code, LOAD, "typed"); S.code = ""; render(); } } },
+        h("input", { "data-k": "code", value: S.code, oninput: e => { S.code = e.target.value; }, placeholder: "Type a tag", autocomplete: "off", autocapitalize: "characters", spellcheck: "false", enterkeyhint: "go" }),
+        h("button", null, "Check")),
+      h("div", { class: "hint" }, "Scan in any order. Bluetooth scanner: just scan — it works whenever this screen is open.")),
+    S.last && S.last.stopId === LOAD ? resultCard(S.last) : null,
+    L.extras.length ? h("div", { class: "card" }, h("h3", { style: { marginTop: 0, color: "var(--bad)" } }, `Not on this run (${L.extras.length}) — take off the truck`),
+      L.extras.map(sc => h("div", { class: "pkg issue" }, h("div", { class: "ic" }, "!"), h("div", { class: "main" }, h("div", { class: "name" }, "Not on this run"), tagNode(sc.tag))))) : null,
+    h("h3", null, `Not loaded yet (${nLeft})`),
+    h("div", { class: "card" }, left.length ? left.map(x => [h("div", { class: "grp" }, `Stop ${x.i + 1}: ${x.s.name} · ${x.list.length} left`), x.list.map(p => row(p, x.s))])
+      : h("div", { class: "empty" }, "Everything is on the truck. 🎉")),
+    h("div", { style: { margin: "6px 0 30px" } }, L.done
+      ? h("button", { class: "big", onclick: () => S.store.setStopDone(m.id, LOAD, null, m.status) }, "Redo the load check")
+      : h("button", { class: nLeft ? "big" : "primary big", onclick: () => finishLoad(m, L, nLeft) }, nLeft ? `Done loading (${nLeft} not loaded)` : "✓ Done loading")));
+}
+function handleLoad(m, tag, raw, via, fromCamera) {
+  const L = loadSummary(m, S.scans, S.local.get(LOAD)), hit = L.byTag.get(tag);
+  let local = S.local.get(LOAD); if (!local) S.local.set(LOAD, local = new Set());
+  let result;
+  if (!hit) result = "not_on_manifest";
+  else if (L.loaded.has(tag)) result = "duplicate";
+  else { result = "match"; local.add(tag); }
+  const scan = { tag, stopId: LOAD, result, at: Date.now(), via, truck: m.truck || S.driver.truck, driverName: S.driver.name || "" };
+  if (String(raw).trim().toUpperCase() !== tag) scan.raw = String(raw).slice(0, 200);
+  S.store.addScan(m.id, scan);
+  S.last = { ...scan, pkg: hit && hit.pkg, forStopId: hit && hit.stop.id };
+  if (!fromCamera) signal(RESULT[result].tone);
+  render();
+  return S.last;
+}
+function openLoadCamera() {
+  const m = S.manifest;
+  scanMany({ title: `Load check · ${runTitle(m)}`, formats: FORMATS, manualNumeric: false, manualPlaceholder: "Or type the tag",
+    hint: "Scan every package as it goes on the truck.",
+    onDetect: hit => {
+      const r = handleCode(hit.code, LOAD, hit.source === "typed" ? "typed" : "camera", true);
+      if (!r) return null;
+      const L = loadSummary(m, S.scans, S.local.get(LOAD)), p = r.pkg, i = p ? m.stops.findIndex(s => s.id === r.forStopId) : -1;
+      const title = r.result === "match" ? `✓ Loaded · Stop ${i + 1}${p.box ? ` · ${multiOrigin(m.stops[i]) && p.originShort ? p.originShort + " " : ""}Box # ${p.box}` : ""}  (${L.loaded.size}/${L.total})`
+        : r.result === "duplicate" ? `Already loaded  (${L.loaded.size}/${L.total})` : "✗ Not on this run — don't load it";
+      return { tone: RESULT[r.result].tone, title, lines: p ? [p.item || "(no item name)", m.stops[i].name, r.tag] : [r.tag] };
+    } });
+}
+function finishLoad(m, L, nLeft) {
+  if (nLeft && !confirm(`${plural(nLeft, "package")} ${nLeft > 1 ? "aren't" : "isn't"} loaded. Finish anyway? The office will see what's missing.`)) return;
+  const missing = (m.stops || []).flatMap(s => s.packages.filter(p => !L.loaded.has(p.tag)).map(p => p.tag));
+  S.store.setStopDone(m.id, LOAD, { at: Date.now(), missing, loaded: L.loaded.size, by: S.driver.name || S.driver.truck }, m.status === "assigned" ? "assigned" : m.status);
   S.last = null;
   location.hash = `#/m/${encodeURIComponent(m.id)}`;
 }

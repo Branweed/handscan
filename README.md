@@ -104,3 +104,21 @@ It's tuned to the Massachusetts Metrc "Marijuana Transportation Manifest" and to
 - This is a delivery check, not a Metrc record. The receiving licensee still accepts the transfer in Metrc.
 - Scans that haven't uploaded are shown at the top ("Offline · 3 saved on phone"). If a driver tries to sign out with scans still waiting, the app warns them first.
 - The free plan's limits (50,000 reads and 20,000 writes a day) are far more than a delivery fleet needs.
+
+---
+
+## Phone access (company code)
+
+Runs are only visible to **office admins** and **phones that entered the company code** once. Someone with just the link sees nothing.
+
+One-time setup:
+1. Firebase console → **Authentication → Sign-in method → Add new provider → Anonymous → Enable.** (Phones sign in invisibly; drivers never see it.)
+2. Firebase console → **Firestore Database → Rules** → paste all of `firestore.rules` → **Publish**.
+3. Office → **Trucks & phones** → **Phone access** → set a 4–8 digit code. Same tab: check the **Drivers** list (it starts from the crews already seen on manifests) and add anyone missing.
+4. On each phone: open the app → enter the code → done. It's remembered.
+
+- **Lost a phone / someone left?** Office → Trucks & phones → remove that phone, or **Remove all phones** and change the code.
+- If Chrome's site data is cleared, that phone just asks for the code again.
+
+## Load check
+On the run screen, drivers tap **Load check** at the dock and scan every package onto the truck in any order. They see what's left per stop, get a red alert for a tag that isn't on the run, and tap **Done loading**. The office sees "Load check: 42 of 42 loaded · finished 6:40 · John" on the run (and anything not loaded).

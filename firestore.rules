@@ -1,5 +1,11 @@
 rules_version = '2';
 // Paste this into Firebase console → Firestore Database → Rules, then Publish.
+//
+// Who can see what:
+//   • Office admins (username + password): everything.
+//   • Approved phones: runs, scans, the truck list and the driver-name list. A phone signs in invisibly
+//     (Firebase "Anonymous" sign-in) and is approved once by entering the company code set in the Office.
+//   • Anyone else (someone who only has the link): nothing.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -7,40 +13,52 @@ service cloud.firestore {
     function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
     function hasProfile() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
     function isAdmin() { return hasProfile() && profile().role == 'admin'; }
-    function isDriver() { return hasProfile() && profile().role == 'driver' && profile().active == true; }
-    // A run is shared by every driver on the truck it was sent to.
-    function onRun(data) { return request.auth.uid in data.driverIds; }
-    function ownsManifest(mid) {
-      return onRun(get(/databases/$(database)/documents/manifests/$(mid)).data);
-    }
+    function approvedPhone() { return signedIn() && exists(/databases/$(database)/documents/devices/$(request.auth.uid)); }
+    function canSeeRuns() { return isAdmin() || approvedPhone(); }
 
-    // People. Only the office can create or change accounts' roles.
+    // Office accounts. Only the office can create or change them.
     match /users/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
       allow write: if isAdmin();
     }
-
-    // Trucks: drivers see the list on the sign-in screen; only the office changes it.
-    match /trucks/{code} { allow read: if true; allow write: if isAdmin(); }
     match /driverLogins/{uid} { allow read, write: if isAdmin(); }
 
-    // Runs (one per truck per day, holding one or more Metrc manifests).
-    // Drivers sign in with just a truck name (no password), so runs can be read without an account.
-    // Without an account they can only mark stops finished and add scans; the office does everything else.
+    // The company code: only the office can read or change it. (Rules can still compare against it below.)
+    match /settings/access { allow read, write: if isAdmin(); }
+    // The "Who are you?" list on the phones.
+    match /settings/drivers { allow read: if canSeeRuns(); allow write: if isAdmin(); }
+
+    // Approved phones. A phone can add itself only with the right company code; the office can remove any.
+    match /devices/{uid} {
+      allow read: if (signedIn() && request.auth.uid == uid) || isAdmin();
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['code', 'at', 'name'])
+        && request.resource.data.code is string
+        && exists(/databases/$(database)/documents/settings/access)
+        && request.resource.data.code == get(/databases/$(database)/documents/settings/access).data.code;
+      allow delete: if isAdmin();
+    }
+
+    // Trucks: approved phones see the list; only the office changes it.
+    match /trucks/{code} { allow read: if canSeeRuns(); allow write: if isAdmin(); }
+
+    // Runs. Phones can only mark stops (and the load check) finished and add scans; the office does everything else.
     match /manifests/{mid} {
       function run() { return get(/databases/$(database)/documents/manifests/$(mid)).data; }
-      allow read: if true;
+      allow read: if canSeeRuns();
       allow create, delete: if isAdmin();
       allow update: if isAdmin()
-        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stopsDone', 'status', 'updatedAt'])
+        || (approvedPhone()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stopsDone', 'status', 'updatedAt'])
             && resource.data.status in ['assigned', 'in_progress', 'done']
             && request.resource.data.status in ['assigned', 'in_progress', 'done']);
 
-      // Scans: anyone with the app can add one to a live run (never edit or delete); it must name that run's truck.
+      // Scans: an approved phone can add one to a live run (never edit or delete); it must name that run's truck.
       match /scans/{sid} {
-        allow read: if true;
+        allow read: if canSeeRuns();
         allow create: if isAdmin()
-          || (request.resource.data.keys().hasOnly(['tag', 'stopId', 'result', 'at', 'via', 'truck', 'driverName', 'otherStopId', 'raw', 'syncedAt'])
+          || (approvedPhone()
+              && request.resource.data.keys().hasOnly(['tag', 'stopId', 'result', 'at', 'via', 'truck', 'driverName', 'otherStopId', 'raw', 'syncedAt'])
               && request.resource.data.tag is string && request.resource.data.tag.size() <= 64
               && request.resource.data.result in ['match', 'duplicate', 'wrong_stop', 'not_on_manifest']
               && request.resource.data.truck == run().truck
