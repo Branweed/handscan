@@ -94,17 +94,28 @@ label.f>input,label.f>select{margin-top:4px}
 .result .boxfrom{font-size:18px;font-weight:800;color:var(--primary);margin:-2px 0 4px}
 .grp{font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:12px 0 2px;border-top:1px solid var(--line)}
 .grp:first-child{border-top:0;padding-top:0}
-.truckbtns{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
-.truckbtns button{flex-direction:column;min-height:72px;gap:2px}
-.truckbtns button b{font-size:22px}
-.truckbtns button span{font-size:12.5px;font-weight:600;opacity:.8}
-.login>.card{margin-bottom:12px}
-.truckbtns button{min-height:84px}
-.truckbtns button b{font-size:26px}
-/* first screen: one big full-width button per truck */
-.truckbtns{grid-template-columns:1fr !important;gap:12px}
-.truckbtns button{flex-direction:row !important;justify-content:space-between;min-height:76px !important;padding:0 22px;text-align:left}
-.truckbtns button b{font-size:30px !important;letter-spacing:.02em}
-.truckbtns button span{font-size:16px !important;font-weight:700}
-.login{max-width:480px}
-.login .title{font-size:22px}
+/* ---------------- first screen: truck picker ---------------- */
+.pick{max-width:480px;margin:8px auto 28px}
+.pick-q{font-size:24px;font-weight:850;letter-spacing:-.01em;margin:10px 2px 14px}
+.trucks{display:flex;flex-direction:column;gap:12px}
+.truck{display:flex;align-items:center;gap:16px;width:100%;min-height:88px;padding:14px 16px;border-radius:18px;border:1px solid var(--line);
+  background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.06),0 4px 14px rgba(0,0,0,.05);text-align:left;justify-content:flex-start;
+  -webkit-tap-highlight-color:transparent;transition:transform .08s,box-shadow .15s}
+.truck:active{transform:scale(.985);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.truck.last{border:2px solid var(--primary)}
+.tcode{flex:none;width:86px;height:60px;padding:0 6px;border-radius:14px;background:var(--primary);color:var(--primary-ink);
+  display:grid;place-items:center;font-size:26px;font-weight:900;letter-spacing:.02em}
+.tinfo{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px}
+.tname{font-size:19px;font-weight:800;line-height:1.2}
+.tcrew{font-size:14.5px;font-weight:600;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.tlast{margin-top:4px;font-size:11.5px}
+.tgo{flex:none;font-size:34px;line-height:1;color:var(--muted);font-weight:400;margin-right:2px}
+.linkbtn{background:none;border:0;min-height:40px;padding:0 2px;margin-top:6px;color:var(--primary);font-size:15px;justify-content:flex-start}
+.pick .manual{margin-top:12px}
+.pick-name{margin-top:18px;font-size:14px}
+.pick-name input{margin-top:6px;min-height:50px;background:var(--card)}
+.pick-sep{height:1px;background:var(--line);margin:22px 0 18px}
+.office{background:transparent;border:1.5px solid var(--line);color:var(--ink);min-height:56px;font-size:17px}
+@media (max-width:380px){.tcode{width:72px;height:54px;font-size:22px}.tname{font-size:17px}.truck{gap:12px;min-height:80px}}
+/* office header: keep it on one tidy line on phones */
+@media (max-width:520px){.top .who{display:none}.top h1{font-size:17px}}

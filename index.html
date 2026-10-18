@@ -7,7 +7,7 @@
 <title>Manifest Check</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="app.css">
 <script>
 // Chrome's "Desktop site" mode lays pages out ~980px wide on a phone, so everything looks tiny.
@@ -57,7 +57,10 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catc
   try { S.store = await createStore("driver"); }
   catch (e) { swap(root, h("div", { class: "card empty" }, "Couldn't start the app. Connect to the internet once and reload — after that it works offline.")); return; }
   S.unsub.trucks = S.store.watchTrucks(l => { S.trucks = l; if (!S.driver) render(); }, () => {});
-  setDriver(loadDriver());
+  const saved = loadDriver();
+  if (saved) { S.pickName = saved.name || ""; S.lastTruck = saved.truck || ""; }
+  // Opening the app always starts on the truck buttons. Only a link straight into a run (e.g. a reload mid-stop) skips them.
+  setDriver(route().mid && saved && saved.truck ? saved : null);
   addEventListener("hashchange", () => { followRoute(); render(); scrollTo(0, 0); });
   addEventListener("online", render); addEventListener("offline", render);
   $("menu").onclick = () => {
@@ -68,7 +71,7 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catc
 function setDriver(d) {
   ["list", "m", "sc"].forEach(k => { S.unsub[k] && S.unsub[k](); S.unsub[k] = null; });
   Object.assign(S, { driver: d && d.truck ? d : null, manifests: [], mid: null, manifest: undefined, scans: [], pending: 0, local: new Map(), last: null });
-  saveDriver(S.driver);
+  if (S.driver) { saveDriver(S.driver); S.lastTruck = S.driver.truck; S.pickName = S.driver.name || S.pickName; }
   if (S.driver) { S.unsub.list = S.store.watchTruckRuns(S.driver.truck, l => { S.manifests = l; render(); }, onErr); followRoute(); }
   render();
 }
@@ -94,7 +97,7 @@ function render() {
   if (!navigator.onLine) { sync.className = "pill off"; sync.textContent = S.pending ? `Offline · ${S.pending} saved on phone` : "Offline"; }
   else { sync.className = "pill"; sync.textContent = S.pending ? `Uploading ${S.pending}…` : DEMO ? "Demo" : "Online"; }
   $("menu").hidden = !S.driver;
-  $("menu").textContent = "Change truck";
+  $("menu").textContent = "Trucks";
   if (S.driver === undefined) return;
   if (!S.driver) return swap(root, loginView());
   swap(root, h("div", null,
@@ -113,31 +116,39 @@ function body() {
   return stop ? stopView(stop) : manifestView();
 }
 
-/* ---------------- first screen: tap your truck (no password), or go to the office sign-in ---------------- */
+/* ---------------- first screen: tap your truck (no password), office button underneath ---------------- */
 function loginView() {
   const byCode = new Map(KNOWN_TRUCKS.map(t => [t.code, { ...t }]));
   for (const t of S.trucks) byCode.set(t.code, { ...(byCode.get(t.code) || {}), ...t });
-  const trucks = [...byCode.values()].sort((a, b) => {
-    const ka = KNOWN_TRUCKS.findIndex(t => t.code === a.code), kb = KNOWN_TRUCKS.findIndex(t => t.code === b.code);
-    return (ka < 0 ? 99 : ka) - (kb < 0 ? 99 : kb) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true });
-  });
+  const order = c => { const i = KNOWN_TRUCKS.findIndex(t => t.code === c); return i < 0 ? 99 : i; };
+  const trucks = [...byCode.values()].sort((a, b) => order(a.code) - order(b.code) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
   const start = code => { const c = String(code || "").trim().toUpperCase(); if (c) setDriver({ truck: c, name: S.pickName.trim() }); };
-  const crew = trucks.flatMap(t => t.crew || []).map(c => c.name);
-  return h("div", { class: "login" },
-    h("div", { class: "card" },
-      h("h2", { class: "title", style: { marginTop: 0 } }, "Which truck are you on?"),
-      h("div", { class: "truckbtns" }, trucks.map(t => h("button", { type: "button", onclick: () => start(t.code) },
-        h("b", null, t.code), t.nickname ? h("span", null, t.nickname) : null))),
-      h("input", { "data-k": "dname", value: S.pickName, placeholder: "Your name (optional)", list: "crewnames", autocomplete: "off", style: { marginTop: "12px" },
-        oninput: e => { S.pickName = e.target.value; } }),
-      h("datalist", { id: "crewnames" }, [...new Set(crew)].map(n => h("option", { value: n }))),
-      S.other
-        ? h("form", { class: "manual", onsubmit: e => { e.preventDefault(); start(S.pick); } },
-            h("input", { "data-k": "truck", value: S.pick, placeholder: "Truck name", autocapitalize: "characters", spellcheck: "false", style: { textTransform: "uppercase" },
-              oninput: e => { S.pick = e.target.value; } }), h("button", null, "Go"))
-        : h("button", { type: "button", class: "ghost small", style: { marginTop: "8px" }, onclick: () => { S.other = true; render(); } }, "A different truck…"),
-      h("div", { class: "hint" }, "No password needed. Open the app once while you have internet so your run downloads; after that it works offline.")),
-    h("a", { class: "btn big", href: "admin.html", style: { marginTop: "4px" } }, "🔒  Office / Admin sign in"));
+  const crewOf = t => (t.crew || []).map(c => firstName(c.name)).filter(Boolean);
+  const allCrew = [...new Set(trucks.flatMap(t => (t.crew || []).map(c => c.name)).filter(Boolean))];
+  return h("div", { class: "pick" },
+    h("h2", { class: "pick-q" }, "Which truck are you on?"),
+    h("div", { class: "trucks" }, trucks.map(t => {
+      const last = t.code === S.lastTruck, crew = crewOf(t);
+      return h("button", { type: "button", class: "truck" + (last ? " last" : ""), onclick: () => start(t.code) },
+        h("span", { class: "tcode" }, t.code),
+        h("span", { class: "tinfo" },
+          h("span", { class: "tname" }, t.nickname || `Truck ${t.code}`),
+          crew.length ? h("span", { class: "tcrew" }, crew.join(" & ")) : null,
+          last ? h("span", { class: "chip ok tlast" }, "Last used") : null),
+        h("span", { class: "tgo", "aria-hidden": "true" }, "›"));
+    })),
+    S.other
+      ? h("form", { class: "manual", onsubmit: e => { e.preventDefault(); start(S.pick); } },
+          h("input", { "data-k": "truck", value: S.pick, placeholder: "Truck name", autocapitalize: "characters", spellcheck: "false", style: { textTransform: "uppercase" },
+            oninput: e => { S.pick = e.target.value; } }), h("button", { class: "primary" }, "Go"))
+      : h("button", { type: "button", class: "linkbtn", onclick: () => { S.other = true; render(); } }, "Truck not listed?"),
+    h("label", { class: "f pick-name" }, "Your name (optional)",
+      h("input", { "data-k": "dname", value: S.pickName, placeholder: "e.g. John", list: "crewnames", autocomplete: "off",
+        oninput: e => { S.pickName = e.target.value; } })),
+    h("datalist", { id: "crewnames" }, allCrew.map(n => h("option", { value: n }))),
+    h("div", { class: "hint" }, "No password needed. Open the app once with internet each morning so your run downloads — then it works offline."),
+    h("div", { class: "pick-sep" }),
+    h("a", { class: "btn big office", href: "admin.html" }, "🔒  Office / Admin"));
 }
 
 /* ---------------- manifest list ---------------- */

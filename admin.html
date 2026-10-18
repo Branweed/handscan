@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#17614a">
 <title>Manifest Check Office</title>
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="app.css">
 <script>
 // Chrome's "Desktop site" mode lays pages out ~980px wide on a phone, so everything looks tiny.
@@ -124,7 +126,7 @@ function loginView() {
       try { await A.store.signIn(adminEmail(user.value), pw.value); }
       catch (err) { msg.textContent = /invalid-credential|wrong-password|user-not-found|invalid-email/.test(err.code || "") ? "That username or password isn't right." : friendlyError(err); }
     } }, h("h2", { class: "title" }, "Office sign in"), user, pw, h("button", { class: "primary big" }, "Sign in"), msg,
-      h("a", { class: "back", href: "./", style: { marginTop: "8px" } }, "← Back to the trucks"));
+      h("a", { class: "btn big", href: "./", style: { marginTop: "4px" } }, "← Driver app (trucks)"));
 }
 
 /* ======================= upload + review ======================= */
