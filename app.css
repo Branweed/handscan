@@ -91,3 +91,6 @@ label.f>input,label.f>select{margin-top:4px}
 [hidden]{display:none!important}
 .result .bigbox{font-size:52px;line-height:1.05;font-weight:900;color:var(--primary);margin-top:6px;letter-spacing:-.01em}
 .result .rg b{font-size:20px}
+.result .boxfrom{font-size:18px;font-weight:800;color:var(--primary);margin:-2px 0 4px}
+.grp{font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:12px 0 2px;border-top:1px solid var(--line)}
+.grp:first-child{border-top:0;padding-top:0}

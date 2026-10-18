@@ -49,6 +49,9 @@ When you upload a run, the app reads the manifest's **Name of Person Transportin
 - **Truck:** "Ford, Transit 250 White 99, X78446" becomes **W99** ("Berry White" becomes BW, "White Widow" becomes WW). You can correct it, and it's remembered by license plate after that.
 - **New drivers:** they get a login made for them: their **Employee ID** plus a **6-digit PIN** the app picks. The PINs are shown after you send, and any time on **Drivers & trucks → Show PIN**.
 
+### Two facilities, one order
+Most orders ship as two sets: a manifest + WTI from **Fall River (MP281319)** and another from **Lakeville (MC282112)**. Upload all of a truck's files together (or use **+ Add more files** on the review screen). Every manifest for the same customer becomes **one stop**, and each box is labeled with where it came from (FR / LV), because each WTI numbers its boxes from 1. The review screen points out any customer that only has one set. To add another facility, add a line to `ORIGINS` in `shared.js`.
+
 ### Driver setup (once per phone)
 1. Open **https://branweed.github.io/handscan/** in **Chrome** and sign in with Employee ID + PIN **while connected to the internet**.
 2. Open Chrome's ⋮ menu and choose **Add to Home screen / Install app**.

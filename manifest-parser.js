@@ -15,7 +15,7 @@
  *   - Generic "label: value" PDFs, table PDFs, and CSV exports.
  * The office page always shows a preview, so anything it gets wrong can be fixed before sending.
  */
-import { TAG_RE, TAG_RE_G, normalizeTag, looksLikeTag, uid } from "./shared.js";
+import { TAG_RE, TAG_RE_G, normalizeTag, looksLikeTag, uid, originInfo, originRank } from "./shared.js";
 
 const PDFJS_VER = "4.4.168";
 export const PDFJS_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VER}/build/pdf.min.mjs`;
@@ -262,6 +262,15 @@ export function parseLines(lines) {
       out.vehicle = (v.t + more).replace(/,\s*,/g, ",").replace(/,\s*$/, "");
     }
   }
+  // where it ships from: "Originating License Number | MP281319" (manifest) or "Originating License | MP281319" (WTI)
+  out.originLicense = (labelValue(lines, [/^originating\s*license(?:\s*(?:no\.?|number|#))?/i, null]).split(/\s/)[0] || "").toUpperCase();
+  for (let i = 0; i < lines.length && !out.originCity; i++) {
+    if (!/address\s*of\s*originating|originating\s*address/i.test(lineText(lines[i]))) continue;
+    for (const l of [lines[i - 1], lines[i], lines[i + 1]].filter(Boolean)) {
+      const m = lineText(l).match(/([A-Za-z][A-Za-z .'-]*),\s*[A-Z]{2}\s+\d{5}/);
+      if (m) { out.originCity = m[1].replace(/^.*\s{2,}/, "").trim(); break; }
+    }
+  }
 
   const seen = new Set();
   let stop = null, tbl = null, pkg = null, pkgLines = [], srcList = false;
@@ -506,24 +515,36 @@ function finish(r, source, fileName, rawText) {
   if (noQty) warnings.push(`${noQty} package${noQty > 1 ? "s have" : " has"} no quantity.`);
   if (odd) warnings.push(`${odd} tag${odd > 1 ? "s don't" : " doesn't"} look like a Metrc tag.`);
   return { kind, manifestNo: r.manifestNo || "", invoiceNo: r.invoiceNo || "", date: r.date || "", stops, warnings, source, fileName, rawText,
-    transporters: r.transporters || [], vehicle: r.vehicle || "" };
+    transporters: r.transporters || [], vehicle: r.vehicle || "", origin: originInfo(r.originLicense, r.originCity) };
 }
 
 /* ======================= several files → one delivery run ======================= */
 const mkey = n => String(n || "").replace(/\D/g, "").replace(/^0+/, "");
-export function combine(results) {
+// Each file's packages remember which facility and manifest they came from.
+function tagOrigin(s, r) {
+  const o = r.origin || {};
+  s.sets = [{ manifestNo: r.manifestNo || "", invoiceNo: r.kind === "invoice" ? r.invoiceNo || "" : "", origin: o.name || "", originShort: o.short || "", originLicense: o.license || "" }];
+  s.packages.forEach(p => { p.manifestNo = r.manifestNo || ""; p.origin = o.name || ""; p.originShort = o.short || ""; });
+}
+export function combine(input) {
+  const results = JSON.parse(JSON.stringify(input));       // the parsed files stay untouched, so more can be added later
   const manifests = results.filter(r => r.kind !== "invoice"), invoices = results.filter(r => r.kind === "invoice");
   const stops = [], warnings = [];
-  const label = r => (r.kind === "invoice" ? `Invoice ${r.invoiceNo || r.fileName}` : `Manifest ${r.manifestNo || r.fileName}`);
-  for (const r of manifests) { r.warnings.forEach(w => warnings.push(`${label(r)}: ${w}`)); stops.push(...r.stops); }
+  const from = r => (r.origin && r.origin.name ? ` (${r.origin.name})` : "");
+  const label = r => (r.kind === "invoice" ? `WTI ${r.invoiceNo || r.fileName}${from(r)}` : `Manifest ${r.manifestNo || r.fileName}${from(r)}`);
+  for (const r of manifests) { r.warnings.forEach(w => warnings.push(`${label(r)}: ${w}`)); r.stops.forEach(s => tagOrigin(s, r)); stops.push(...r.stops); }
   for (const inv of invoices) {
     inv.warnings.forEach(w => warnings.push(`${label(inv)}: ${w}`));
-    const target = stops.filter(s => s.manifestNo && mkey(s.manifestNo) === mkey(inv.manifestNo));
+    const target = stops.filter(s => s.sets.some(x => x.manifestNo && mkey(x.manifestNo) === mkey(inv.manifestNo)));
     if (!target.length) {
-      if (manifests.length) warnings.push(`${label(inv)} is for manifest ${inv.manifestNo || "?"}, which wasn't uploaded. Using the invoice's list for that stop.`);
-      stops.push(...inv.stops);
+      if (manifests.length) warnings.push(`${label(inv)} is for manifest ${inv.manifestNo || "?"}, which wasn't uploaded. Using the WTI's list for that stop.`);
+      inv.stops.forEach(s => tagOrigin(s, inv)); stops.push(...inv.stops);
       continue;
     }
+    const set = target[0].sets.find(x => mkey(x.manifestNo) === mkey(inv.manifestNo));
+    if (inv.origin && inv.origin.license && set.originLicense && inv.origin.license !== set.originLicense)
+      warnings.push(`⚠ ${label(inv)} says it ships from ${inv.origin.name}, but manifest ${inv.manifestNo} ships from ${set.origin}.`);
+    set.invoiceNo = inv.invoiceNo || set.invoiceNo;
     const byTag = new Map(target.flatMap(s => s.packages.map(p => [p.tag, p])));
     const invPkgs = inv.stops.flatMap(s => s.packages), invTags = new Set(invPkgs.map(p => p.tag));
     for (const ip of invPkgs) {
@@ -531,23 +552,49 @@ export function combine(results) {
       if (!p) { warnings.push(`⚠ ${label(inv)} lists ${ip.tag} (${ip.item || "no name"}) but manifest ${inv.manifestNo} doesn't.`); continue; }
       if (ip.box) p.box = ip.box;
       if (!p.batch && ip.batch) p.batch = ip.batch;
-      else if (ip.batch && p.batch && ip.batch.toUpperCase() !== p.batch.toUpperCase()) warnings.push(`${ip.tag}: batch is ${p.batch} on the manifest but ${ip.batch} on ${label(inv).toLowerCase()}.`);
+      else if (ip.batch && p.batch && ip.batch.toUpperCase() !== p.batch.toUpperCase()) warnings.push(`${ip.tag}: batch is ${p.batch} on the manifest but ${ip.batch} on the WTI.`);
       if (!p.item && ip.item) p.item = ip.item;
-      if (ip.qty && p.qty && Number(ip.qty) !== Number(p.qty)) warnings.push(`⚠ ${ip.tag}: quantity is ${p.qty} ${p.uom} on the manifest but ${ip.qty} ${ip.uom} on ${label(inv).toLowerCase()}.`);
+      if (ip.qty && p.qty && Number(ip.qty) !== Number(p.qty)) warnings.push(`⚠ ${ip.tag}: quantity is ${p.qty} ${p.uom} on the manifest but ${ip.qty} ${ip.uom} on ${label(inv)}.`);
     }
-    for (const [t, p] of byTag) if (!invTags.has(t)) warnings.push(`⚠ Manifest ${inv.manifestNo}: ${t} (${p.item || "no name"}) isn't on ${label(inv).toLowerCase()}.`);
-    target.forEach(s => { s.invoiceNo = inv.invoiceNo || s.invoiceNo; });
+    for (const [t, p] of byTag) if (mkey(p.manifestNo) === mkey(inv.manifestNo) && !invTags.has(t))
+      warnings.push(`⚠ Manifest ${inv.manifestNo}: ${t} (${p.item || "no name"}) isn't on ${label(inv)}.`);
   }
-  // two copies of the same manifest, or the same tag on two manifests
+  // the same tag on two manifests (or the same manifest uploaded twice)
   const seen = new Map();
   for (const s of stops) for (const p of s.packages) {
-    if (seen.has(p.tag)) warnings.push(`⚠ ${p.tag} is on both ${seen.get(p.tag)} and ${s.name}.`); else seen.set(p.tag, s.name);
+    const where = `${s.name}${p.origin ? ` (${p.origin})` : ""}`;
+    if (seen.has(p.tag)) warnings.push(`⚠ ${p.tag} is on both ${seen.get(p.tag)} and ${where}.`); else seen.set(p.tag, where);
   }
-  stops.forEach(s => { s.id = uid("s"); });
+  // one stop per customer: a Fall River set and a Lakeville set for the same order become one stop
+  const key = s => String(s.license || "").toUpperCase() || String(s.name || "").toLowerCase();
+  const merged = [];
+  for (const s of stops) {
+    const into = merged.find(m => key(m) === key(s));
+    if (!into) { merged.push(s); continue; }
+    for (const p of s.packages) if (!into.packages.some(q => q.tag === p.tag)) into.packages.push(p);
+    for (const x of s.sets) if (!into.sets.some(y => mkey(y.manifestNo) === mkey(x.manifestNo))) into.sets.push(x);
+    if (!into.address && s.address) into.address = s.address;
+  }
+  for (const s of merged) {
+    s.id = uid("s");
+    s.sets.sort((a, b) => originRank(a.originLicense) - originRank(b.originLicense));
+    const rank = new Map(s.sets.map((x, i) => [mkey(x.manifestNo), i]));
+    const r = p => { const v = rank.get(mkey(p.manifestNo)); return v == null ? 99 : v; };
+    s.packages = s.packages.map((p, i) => [p, i]).sort((a, b) => r(a[0]) - r(b[0]) || a[1] - b[1]).map(x => x[0]);
+    s.manifestNo = s.sets.map(x => x.manifestNo).filter(Boolean).join(", ");
+    s.invoiceNo = s.sets.map(x => x.invoiceNo).filter(Boolean).join(", ");
+    if (invoices.length) for (const x of s.sets) if (x.manifestNo && !x.invoiceNo)
+      warnings.push(`${s.name}: no WTI uploaded for ${x.origin ? x.origin + " " : ""}manifest ${x.manifestNo}, so its boxes have no numbers.`);
+  }
+  // things that should match across the files of one run
+  const plates = [...new Set(manifests.map(r => (r.vehicle || "").replace(/\s+/g, " ").trim()).filter(Boolean))];
+  if (plates.length > 1) warnings.push(`⚠ The manifests list different vehicles: ${plates.join(" / ")}. Check they all go on one truck.`);
+  const dates = [...new Set(manifests.map(r => r.date).filter(Boolean))];
+  if (dates.length > 1) warnings.push(`The manifests have different departure dates (${dates.join(", ")}).`);
   const dated = manifests.find(r => r.date) || invoices.find(r => r.date);
   return {
     date: dated ? dated.date : "",
-    stops, warnings: [...new Set(warnings)],
+    stops: merged, warnings: [...new Set(warnings)],
     transporters: [...new Map(results.flatMap(r => r.transporters || []).map(t => [t.employeeId || t.name.toLowerCase(), t])).values()],
     vehicle: (results.find(r => r.vehicle) || {}).vehicle || "",
     files: results.map(r => r.fileName),

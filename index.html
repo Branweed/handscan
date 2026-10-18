@@ -19,7 +19,7 @@
 <main id="app"><div class="empty">Loading…</div></main>
 <script type="module">
 import { DEMO, h, swap, normalizeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, RESULT, plural, friendlyError,
-  runTitle, manifestNos, crewNames, firstName, driverIdsOf, driverEmail } from "./shared.js";
+  runTitle, manifestNos, crewNames, firstName, driverIdsOf, driverEmail, stopSets, setText, multiOrigin, boxLabel } from "./shared.js";
 import { createStore } from "./store.js";
 import { scanMany, signal } from "./barcode-scanner.js";
 
@@ -148,7 +148,7 @@ function manifestView() {
           h("div", { style: { flex: 1, minWidth: 0 } },
             h("div", { class: "rb" }, h("b", null, s.name), done ? h("span", { class: "chip ok" }, "Finished") : null),
             h("div", { class: "meta" }, s.address || s.license),
-            s.manifestNo ? h("div", { class: "meta" }, `Manifest ${s.manifestNo}${s.invoiceNo ? ` · WTI ${s.invoiceNo}` : ""}`) : null,
+            stopSets(s).map(x => h("div", { class: "meta" }, setText(x))),
             h("div", { class: "meta" }, `${got} of ${n} scanned`, issues ? h("span", { class: "chip bad", style: { marginLeft: "8px" } }, plural(issues, "problem")) : null))),
         h("div", { class: "bar" }, h("i", { style: { width: `${n ? (got / n) * 100 : 0}%` } })));
     }));
@@ -160,14 +160,19 @@ function stopView(stop) {
   const idx = m.stops.indexOf(stop), done = stopIsDone(m, stop.id);
   const scanned = stop.packages.filter(p => per.matched.has(p.tag)), todo = stop.packages.filter(p => !per.matched.has(p.tag));
   const issues = uniqIssues(per.issues);
-  const crew = driverIdsOf(m).length > 1;
+  const crew = driverIdsOf(m).length > 1, multi = multiOrigin(stop);
+  // two facilities = two "Box 1"s, so list each facility's boxes under its own heading
+  const grouped = list => !multi ? list.map(p => row(p, false)) : stopSets(stop).map(x => {
+    const mine = list.filter(p => p.origin === x.origin);
+    return mine.length ? [h("div", { class: "grp" }, `From ${x.origin}${x.invoiceNo ? ` · WTI ${x.invoiceNo}` : ""}`), mine.map(p => row(p, false))] : null;
+  }).concat([list.filter(p => !stopSets(stop).some(x => x.origin === p.origin)).map(p => row(p, false))]);
   const row = (p, ok) => {
     const sc = ok && per.matched.get(p.tag);
     return h("div", { class: "pkg" + (ok ? " done" : "") + (S.store.demo && !ok ? " tapme" : ""), onclick: S.store.demo && !ok ? () => handleCode(p.tag, stop.id, "tap") : null },
       h("div", { class: "ic" }, ok ? "✓" : p.box || ""),
       h("div", { class: "main" },
         h("div", { class: "name" }, p.item || "(no item name)"),
-        h("div", { class: "meta" }, [p.box && `Box ${p.box}`, fmtQty(p), p.batch && `Batch ${p.batch}`].filter(Boolean).join(" · ")),
+        h("div", { class: "meta" }, [boxLabel(p, multi), fmtQty(p), p.batch && `Batch ${p.batch}`].filter(Boolean).join(" · ")),
         tagNode(p.tag),
         sc && sc.at ? h("div", { class: "meta" }, `Scanned ${fmtTime(sc.at)}${crew && sc.driverName ? ` by ${firstName(sc.driverName)}` : ""}`) : null));
   };
@@ -177,7 +182,7 @@ function stopView(stop) {
       h("div", { class: "meta" }, `Stop ${idx + 1} of ${m.stops.length}`),
       h("div", { style: { fontSize: "20px", fontWeight: 800 } }, stop.name),
       h("div", { class: "meta" }, [stop.address, stop.license].filter(Boolean).join(" · ")),
-      stop.manifestNo ? h("div", { class: "meta" }, `Manifest ${stop.manifestNo}${stop.invoiceNo ? ` · WTI ${stop.invoiceNo}` : ""}`) : null,
+      stopSets(stop).map(x => h("div", { class: "meta" }, setText(x))),
       h("div", { class: "rb", style: { marginTop: "8px" } }, h("b", null, `${scanned.length} of ${stop.packages.length} scanned`), done ? h("span", { class: "chip ok" }, "Finished") : null),
       h("div", { class: "bar" }, h("i", { style: { width: `${stop.packages.length ? (scanned.length / stop.packages.length) * 100 : 0}%` } })),
       h("div", { style: { marginTop: "14px" } }, h("button", { class: "primary big", onclick: () => openCamera(stop) }, "📷  Scan packages")),
@@ -191,7 +196,7 @@ function stopView(stop) {
         h("div", { class: "main" }, h("div", { class: "name" }, sc.result === "wrong_stop" ? `Belongs to ${stopLabel(sc.otherStopId)}` : "Not on this manifest"),
           infoFor(sc.tag) ? h("div", { class: "meta" }, infoFor(sc.tag).item) : null, tagNode(sc.tag))))) : null,
     h("h3", null, `To scan (${todo.length})`),
-    h("div", { class: "card" }, todo.length ? todo.map(p => row(p, false)) : h("div", { class: "empty" }, "Everything at this stop is scanned. 🎉")),
+    h("div", { class: "card" }, todo.length ? grouped(todo) : h("div", { class: "empty" }, "Everything at this stop is scanned. 🎉")),
     scanned.length ? [h("h3", null, `Scanned (${scanned.length})`), h("div", { class: "card" }, scanned.map(p => row(p, true)),
       h("button", { class: "small", style: { marginTop: "10px" }, onclick: e => copyTags(scanned.map(p => p.tag), e.currentTarget) }, `Copy scanned tags (${scanned.length})`))] : null,
     h("div", { style: { margin: "6px 0 30px" } }, done
@@ -208,6 +213,7 @@ function resultCard(r) {
     h("div", { class: "rb" }, h("div", { class: "rh" }, R.title), h("span", { class: "meta" }, fmtTime(r.at))),
     sub ? h("div", { class: "rs" }, sub) : null,
     p ? [p.box ? h("div", { class: "bigbox" }, `Box # ${p.box}`) : null,
+      p.box && p.origin && S.manifest && (S.manifest.stops || []).some(s => s.id === r.stopId && multiOrigin(s)) ? h("div", { class: "boxfrom" }, `from ${p.origin}`) : null,
       h("div", { class: "ri" }, p.item || "(no item name)"),
       h("div", { class: "rg" }, h("div", null, h("span", null, "Quantity / weight"), h("b", null, fmtQty(p) || "—")), h("div", null, h("span", null, "Batch"), h("b", null, p.batch || "—")))] : null,
     tagNode(r.tag));
@@ -252,7 +258,7 @@ function openCamera(stop) {
       const R = RESULT[r.result], p = r.pkg;
       const per = withLocal(summarize(S.manifest, S.scans)).per[stop.id];
       return { tone: R.tone,
-        title: r.result === "wrong_stop" ? `${R.title} — ${stopLabel(r.otherStopId)}` : `${R.title}${p && p.box ? `  ·  Box # ${p.box}` : ""}  (${per.matched.size}/${stop.packages.length})`,
+        title: r.result === "wrong_stop" ? `${R.title} — ${stopLabel(r.otherStopId)}` : `${R.title}${p && p.box ? `  ·  ${multiOrigin(stop) && p.originShort ? p.originShort + " " : ""}Box # ${p.box}` : ""}  (${per.matched.size}/${stop.packages.length})`,
         lines: p ? [p.item || "(no item name)", [fmtQty(p), p.batch && `Batch ${p.batch}`].filter(Boolean).join(" · "), r.tag] : [r.tag] };
     } });
 }

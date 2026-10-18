@@ -11,13 +11,18 @@
 .drop{display:block;border:2px dashed var(--line);border-radius:14px;padding:26px 16px;text-align:center;cursor:pointer;background:var(--field)}
 .drop.over{border-color:var(--primary);background:var(--soft)}
 .drop b{display:block;font-size:17px;margin-bottom:4px}
-.prow{display:grid;grid-template-columns:minmax(0,.55fr) minmax(0,2.3fr) minmax(0,2.6fr) minmax(0,.7fr) minmax(0,.9fr) minmax(0,1.5fr) auto;gap:6px;align-items:center;padding:4px 0}
+.prow{display:grid;grid-template-columns:minmax(0,.4fr) minmax(0,.55fr) minmax(0,2.3fr) minmax(0,2.6fr) minmax(0,.7fr) minmax(0,.9fr) minmax(0,1.5fr) auto;gap:6px;align-items:center;padding:4px 0}
+.prow .from{font-size:13px;font-weight:800;color:var(--muted);text-align:center}
+.sets{display:flex;flex-direction:column;gap:4px;margin:2px 0 10px;font-size:14px}
+.sets .chip{margin-right:6px}
+.addmore{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.addmore .meta{flex:1;min-width:220px}
 .prow input{min-height:38px;font-size:14px;padding:0 8px}
 .prow input.t{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
 .prow input.badtag{border-color:var(--bad);background:var(--bad-bg)}
 .prow.head{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
 .prow button{min-height:38px;width:38px;padding:0}
-@media (max-width:760px){.prow{grid-template-columns:.6fr 1fr 1fr}.prow .t,.prow .it{grid-column:1/-1}.prow.head{display:none}.prow{border-top:1px solid var(--line);padding:10px 0}}
+@media (max-width:760px){.prow{grid-template-columns:.4fr .6fr 1fr 1fr}.prow .t,.prow .it{grid-column:1/-1}.prow.head{display:none}.prow{border-top:1px solid var(--line);padding:10px 0}}
 .stopcard>.grid2{margin:10px 0}
 .warnlist{margin:8px 0 0;padding-left:20px;color:var(--warn);font-size:14px}
 .oklist{margin:8px 0 0;color:var(--ok);font-size:14px;font-weight:700}
@@ -42,7 +47,7 @@ table.res th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-s
 <main id="app"><div class="empty">Loading…</div></main>
 <script type="module">
 import { DEMO, h, swap, uid, normalizeTag, looksLikeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, plural, downloadCsv,
-  friendlyError, manifestNos, runTitle, crewNames, driverIdsOf, firstName, vehicleInfo } from "./shared.js";
+  friendlyError, manifestNos, runTitle, crewNames, driverIdsOf, firstName, vehicleInfo, stopSets, stopManifestNos, setText, multiOrigin, boxLabel, ORIGINS } from "./shared.js";
 import { createStore } from "./store.js";
 
 const root = document.getElementById("app"), $ = id => document.getElementById(id);
@@ -165,19 +170,29 @@ function blankDraft() {
 const blankPkg = () => ({ box: "", tag: "", item: "", qty: "", uom: "", batch: "" });
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
-async function readFiles(list) {
+// add = true: more files for the run being checked (e.g. the Lakeville set after the Fall River one)
+async function readFiles(list, add = false) {
   const files = [...(list || [])]; if (!files.length) return;
+  const prev = add && A.draft && A.draft._results ? A.draft : null;
   A.busy = `Reading ${plural(files.length, "file")}…`; render();
   try {
     const P = await import("./manifest-parser.js");
-    const results = [];
-    for (const f of files) results.push(await P.parseManifestFile(f));
+    const results = prev ? [...prev._results] : [];
+    for (const f of files) {
+      const r = await P.parseManifestFile(f);
+      if (results.some(x => x.fileName === r.fileName && x.manifestNo === r.manifestNo && x.invoiceNo === r.invoiceNo)) continue;   // same file twice
+      results.push(r);
+    }
     const run = P.combine(results);
     const vi = vehicleInfo(run.vehicle);
     const known = vi.plate && A.trucksDb.find(t => (t.plates || []).includes(vi.plate));
-    A.draft = { ...run, date: run.date || today(), sendTo: guessSendTo(run.transporters.map(t => t.name)),
+    A.draft = { ...run, _results: results, date: run.date || today(), sendTo: guessSendTo(run.transporters.map(t => t.name)),
       truck: known ? known.code : vi.code, plate: vi.plate, nickname: vi.nickname,
       crew: run.transporters.map(t => ({ ...t, include: true })), extra: "" };
+    if (prev) {   // keep what was already chosen
+      A.draft.date = prev.date || A.draft.date; A.draft.truck = prev.truck || A.draft.truck; A.draft.extra = prev.extra;
+      for (const c of A.draft.crew) { const o = (prev.crew || []).find(x => (x.employeeId || x.name) === (c.employeeId || c.name)); if (o) c.include = o.include; }
+    }
     if (!run.stops.length) A.draft.stops = blankDraft().stops;
   } catch (e) {
     console.error(e);
@@ -196,7 +211,12 @@ function draftView() {
   const rc = hasCrew ? null : recipients(d.sendTo);
   const crewReady = hasCrew && d.crew.some(c => c.include) && String(d.truck || "").trim();
   const crit = (d.warnings || []).filter(w => w.startsWith("⚠")), other = (d.warnings || []).filter(w => !w.startsWith("⚠"));
-  const checked = (d.stops || []).filter(s => s.invoiceNo && s.manifestNo).length;
+  const allSets = (d.stops || []).flatMap(s => s.sets || []);
+  const checked = allSets.filter(x => x.invoiceNo && x.manifestNo).length;
+  // Most orders have a Fall River and a Lakeville set; point out stops that came with only one
+  const known = Object.values(ORIGINS).map(o => o.name);
+  const single = (d.stops || []).filter(s => s.sets && s.sets.length === 1 && known.includes(s.sets[0].origin));
+  const more = h("input", { type: "file", multiple: true, hidden: true, accept: ".pdf,.csv,.tsv,.txt,application/pdf,text/csv,text/plain", onchange: e => readFiles(e.target.files, true) });
   const sendLabel = hasCrew
     ? (crewReady ? `Send to ${String(d.truck).toUpperCase()} (${d.crew.filter(c => c.include).map(c => firstName(c.name)).join(" & ")})` : "Fill in the truck and crew")
     : rc ? `Send to ${rc.truck && d.sendTo.startsWith("truck:") ? rc.truck + " (" + rc.names.map(firstName).join(" & ") + ")" : rc.names[0]}` : "Choose who gets this run";
@@ -205,12 +225,17 @@ function draftView() {
       h("div", { class: "rb" }, h("h2", { class: "title", style: { margin: 0 } }, "Check the run"),
         h("span", { class: "meta" }, d.files && d.files.length ? plural(d.files.length, "file") : "Typed in")),
       h("div", { class: "meta" }, `${plural(total, "package")} in ${plural(d.stops.length, "stop")}`),
-      checked && !crit.length && d.source === "multiple" ? h("div", { class: "oklist" }, `✓ Every WTI matches its manifest, tag for tag (${plural(checked, "stop")}).`) : null,
+      checked && !crit.length && d.source === "multiple" ? h("div", { class: "oklist" }, `✓ Every WTI matches its manifest, tag for tag (${plural(checked, "set")}).`) : null,
       crit.length ? h("ul", { class: "warnlist", style: { color: "var(--bad)", fontWeight: 700 } }, crit.map(w => h("li", null, w.replace(/^⚠\s*/, "")))) : null,
       other.length ? h("ul", { class: "warnlist" }, other.map(w => h("li", null, w))) : null,
       h("div", { class: "grid2", style: { marginTop: "12px" } },
         h("label", { class: "f" }, "Delivery date", h("input", { type: "date", "data-k": "d-date", value: d.date, oninput: set(d, "date") })),
-        hasCrew ? null : h("label", { class: "f" }, "Send to", h("select", { "data-k": "d-to", onchange: e => { d.sendTo = e.target.value; render(); } }, sendToOptions(d.sendTo))))),
+        hasCrew ? null : h("label", { class: "f" }, "Send to", h("select", { "data-k": "d-to", onchange: e => { d.sendTo = e.target.value; render(); } }, sendToOptions(d.sendTo)))),
+      d._results ? h("div", { class: "addmore" },
+        h("div", { class: "meta" }, single.length
+          ? `Only one set found for ${single.map(s => `${s.name} (${s.sets[0].origin})`).join(", ")}. If ${single.length > 1 ? "there are" : "there's"} more for ${single.length > 1 ? "them" : "it"}, add the other manifest and WTI.`
+          : "Every manifest for the same customer is combined into one stop."),
+        h("label", { class: "btn small", style: { cursor: "pointer" }, title: "Adds files to this run. Changes typed below are reset." }, "+ Add more files", more)) : null),
     hasCrew ? crewCard(d) : null,
     d.stops.map((s, si) => h("div", { class: "card stopcard" },
       h("div", { class: "rb" }, h("b", null, `Stop ${si + 1}`),
@@ -222,12 +247,16 @@ function draftView() {
         h("label", { class: "f" }, "Stop name", h("input", { "data-k": `s-${s.id}-n`, value: s.name, oninput: set(s, "name"), placeholder: "e.g. Green Leaf Dispensary" })),
         h("label", { class: "f" }, "License", h("input", { "data-k": `s-${s.id}-l`, value: s.license, oninput: set(s, "license") })),
         h("label", { class: "f" }, "Address", h("input", { "data-k": `s-${s.id}-a`, value: s.address, oninput: set(s, "address") })),
-        h("label", { class: "f" }, "Metrc manifest #", h("input", { "data-k": `s-${s.id}-m`, value: s.manifestNo || "", oninput: set(s, "manifestNo") })),
-        h("label", { class: "f" }, "Invoice (WTI) #", h("input", { "data-k": `s-${s.id}-i`, value: s.invoiceNo || "", oninput: set(s, "invoiceNo") }))),
-      h("div", { class: "prow head" }, ["Box", "Metrc tag", "Item", "Qty", "Unit", "Batch", ""].map(x => h("div", null, x))),
+        s.sets && s.sets.length ? null : h("label", { class: "f" }, "Metrc manifest #", h("input", { "data-k": `s-${s.id}-m`, value: s.manifestNo || "", oninput: set(s, "manifestNo") })),
+        s.sets && s.sets.length ? null : h("label", { class: "f" }, "Invoice (WTI) #", h("input", { "data-k": `s-${s.id}-i`, value: s.invoiceNo || "", oninput: set(s, "invoiceNo") }))),
+      s.sets && s.sets.length ? h("div", { class: "sets" }, s.sets.map(x => h("div", { class: "set" },
+        x.originShort ? h("span", { class: "chip" }, x.originShort) : null, setText(x),
+        x.invoiceNo ? null : h("span", { class: "chip warn", style: { marginLeft: "6px" } }, "no WTI")))) : null,
+      h("div", { class: "prow head" }, ["From", "Box", "Metrc tag", "Item", "Qty", "Unit", "Batch", ""].map(x => h("div", null, x))),
       s.packages.map((p, pi) => {
         const nt = normalizeTag(p.tag), bad = p.tag && (!looksLikeTag(nt) || dupTags.has(nt));
         return h("div", { class: "prow" },
+          h("div", { class: "from", title: p.origin || "" }, p.originShort || ""),
           h("input", { "data-k": `p-${s.id}-${pi}-x`, value: p.box || "", placeholder: "Box", oninput: set(p, "box") }),
           h("input", { class: "t" + (bad ? " badtag" : ""), "data-k": `p-${s.id}-${pi}-t`, value: p.tag, placeholder: "1A4…", title: bad ? (dupTags.has(nt) ? "This tag is listed twice" : "Doesn't look like a Metrc tag") : "",
             oninput: set(p, "tag"), onchange: () => render() }),
@@ -300,7 +329,9 @@ async function saveDraft() {
   }
   const stops = d.stops.map((s, i) => ({ id: s.id, name: s.name.trim() || `Stop ${i + 1}`, license: s.license.trim(), address: s.address.trim(),
     manifestNo: String(s.manifestNo || "").trim(), invoiceNo: String(s.invoiceNo || "").trim(),
-    packages: s.packages.map(p => ({ tag: normalizeTag(p.tag), item: p.item.trim(), qty: String(p.qty).trim(), uom: p.uom.trim(), batch: p.batch.trim(), box: String(p.box || "").trim() })).filter(p => p.tag) }))
+    ...(s.sets && s.sets.length ? { sets: s.sets.map(x => ({ manifestNo: x.manifestNo || "", invoiceNo: x.invoiceNo || "", origin: x.origin || "", originShort: x.originShort || "", originLicense: x.originLicense || "" })) } : {}),
+    packages: s.packages.map(p => ({ tag: normalizeTag(p.tag), item: p.item.trim(), qty: String(p.qty).trim(), uom: p.uom.trim(), batch: p.batch.trim(), box: String(p.box || "").trim(),
+      ...(p.origin ? { origin: p.origin, originShort: p.originShort || "" } : {}), ...(p.manifestNo ? { manifestNo: p.manifestNo } : {}) })).filter(p => p.tag) }))
     .filter(s => s.packages.length);
   if (!stops.length) { alert("Add at least one package with a tag."); return; }
   const tags = stops.flatMap(s => s.packages.map(p => p.tag));
@@ -308,7 +339,7 @@ async function saveDraft() {
   if (dups.length) { alert(`These tags are listed more than once. Fix them first:\n${dups.join("\n")}`); return; }
   const odd = tags.filter(t => !looksLikeTag(t));
   if (odd.length && !confirm(`${plural(odd.length, "tag")} don't look like Metrc tags (24 characters starting with 1A). Send anyway?`)) return;
-  const nos = stops.map(s => s.manifestNo).filter(Boolean);
+  const nos = stops.flatMap(stopManifestNos);
   const clash = A.manifests.filter(m => m.status !== "archived" && manifestNos(m).some(n => nos.includes(n)));
   if (clash.length && !confirm(`Manifest ${clash.flatMap(manifestNos).filter(n => nos.includes(n)).join(", ")} was already sent (${clash.map(runTitle).join(", ")}). Send another copy?`)) return;
   const m = { date: d.date || today(), truck: rc.truck, driverIds: rc.ids, driverNames: rc.names, status: "assigned", stops, stopsDone: {},
@@ -399,7 +430,8 @@ function detailView(m) {
         h("div", { class: "rb" }, h("b", null, `${i + 1}. ${s.name}`),
           fin ? h("span", { class: fin.missing && fin.missing.length ? "chip warn" : "chip ok" }, `Finished ${fmtTime(fin.at)}${fin.missing && fin.missing.length ? ` · ${fin.missing.length} missing` : ""}`)
             : h("span", { class: "chip" }, `${p.matched.size}/${s.packages.length}`)),
-        h("div", { class: "meta" }, [s.manifestNo && `Manifest ${s.manifestNo}`, s.invoiceNo && `WTI ${s.invoiceNo}`, s.license, s.address].filter(Boolean).join(" · ")),
+        stopSets(s).map(x => h("div", { class: "meta" }, setText(x))),
+        h("div", { class: "meta" }, [s.license, s.address].filter(Boolean).join(" · ")),
         p.matched.size ? h("button", { class: "small", style: { margin: "6px 0 2px" }, onclick: async e => {
           const btn = e.currentTarget, tags = s.packages.filter(pk => p.matched.has(pk.tag)).map(pk => pk.tag);
           try { await navigator.clipboard.writeText(tags.join("\n")); btn.textContent = `✓ Copied ${plural(tags.length, "tag")}`; }
@@ -410,21 +442,22 @@ function detailView(m) {
           h("tr", null, ["", "Box", "Item", "Qty", "Batch", "Tag", "Scanned"].map(x => h("th", null, x))),
           s.packages.map(pk => { const sc = p.matched.get(pk.tag);
             return h("tr", null, h("td", null, sc ? h("span", { class: "chip ok" }, "✓") : fin ? h("span", { class: "chip bad" }, "Missing") : h("span", { class: "chip" }, "—")),
-              h("td", null, pk.box || ""), h("td", null, pk.item), h("td", null, fmtQty(pk)), h("td", null, pk.batch), h("td", null, tagNode(pk.tag)), h("td", { class: "meta" }, sc ? who(sc) : "")); }),
+              h("td", null, multiOrigin(s) && pk.originShort ? `${pk.originShort} ${pk.box || ""}` : pk.box || ""), h("td", null, pk.item), h("td", null, fmtQty(pk)), h("td", null, pk.batch), h("td", null, tagNode(pk.tag)), h("td", { class: "meta" }, sc ? who(sc) : "")); }),
           issues.map(x => h("tr", null, h("td", null, h("span", { class: "chip bad" }, "!")), h("td"),
             h("td", { colspan: "3" }, x.result === "wrong_stop" ? `Scanned here, but belongs to stop ${m.stops.findIndex(q => q.id === x.otherStopId) + 1}` : "Scanned here, not on this run"),
             h("td", null, tagNode(x.tag)), h("td", { class: "meta" }, who(x)))))));
     }));
 }
 function exportResults(m, sum) {
-  const rows = [["Run", "Date", "Truck", "Drivers", "Stop #", "Stop", "License", "Manifest #", "WTI #", "Box", "Tag", "Item", "Qty", "Unit", "Batch", "Result", "Scanned at", "Scanned by", "Stop finished at"]];
+  const rows = [["Run", "Date", "Truck", "Drivers", "Stop #", "Stop", "License", "From", "Manifest #", "WTI #", "Box", "Tag", "Item", "Qty", "Unit", "Batch", "Result", "Scanned at", "Scanned by", "Stop finished at"]];
   (m.stops || []).forEach((s, i) => {
     const p = sum.per[s.id], fin = m.stopsDone && m.stopsDone[s.id];
-    const base = [runTitle(m), m.date, m.truck || "", crewNames(m), i + 1, s.name, s.license, s.manifestNo || "", s.invoiceNo || ""];
-    for (const pk of s.packages) { const sc = p.matched.get(pk.tag);
-      rows.push([...base, pk.box || "", pk.tag, pk.item, pk.qty, pk.uom, pk.batch, sc ? "Scanned" : fin ? "Missing" : "Not scanned yet",
+    const base = [runTitle(m), m.date, m.truck || "", crewNames(m), i + 1, s.name, s.license];
+    const sets = stopSets(s), setOf = pk => sets.find(x => pk.manifestNo && String(x.manifestNo).replace(/^0+/, "") === String(pk.manifestNo).replace(/^0+/, "")) || (sets.length === 1 ? sets[0] : {});
+    for (const pk of s.packages) { const sc = p.matched.get(pk.tag), st = setOf(pk);
+      rows.push([...base, pk.origin || st.origin || "", pk.manifestNo || st.manifestNo || "", st.invoiceNo || "", pk.box || "", pk.tag, pk.item, pk.qty, pk.uom, pk.batch, sc ? "Scanned" : fin ? "Missing" : "Not scanned yet",
         sc ? new Date(sc.at).toLocaleString() : "", sc ? sc.driverName || "" : "", fin ? new Date(fin.at).toLocaleString() : ""]); }
-    for (const x of p.issues) rows.push([...base, "", x.tag, "", "", "", "", x.result === "wrong_stop" ? "Wrong stop" : "Not on run",
+    for (const x of p.issues) rows.push([...base, "", "", "", "", x.tag, "", "", "", "", x.result === "wrong_stop" ? "Wrong stop" : "Not on run",
       new Date(x.at).toLocaleString(), x.driverName || "", ""]);
   });
   downloadCsv(`${(runTitle(m) || "run").replace(/[^\w-]+/g, "-")}-results.csv`, rows);

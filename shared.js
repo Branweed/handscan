@@ -100,8 +100,31 @@ export function summarize(m, scans = []) {
   return { byTag, per, total, done };
 }
 // A run is what one truck carries: one or more Metrc manifests, each one a stop.
+/* ---------------- where an order ships from (one Metrc manifest + WTI per facility) ---------------- */
+// Most orders have a set from each facility; both go to the same customer, so they're one stop.
+// Add a line here for a new facility. The order here is the order boxes are listed in.
+export const ORIGINS = {
+  MP281319: { name: "Fall River", short: "FR" },
+  MC282112: { name: "Lakeville", short: "LV" },
+};
+export function originInfo(license, city) {
+  const k = String(license || "").toUpperCase().trim();
+  if (ORIGINS[k]) return { license: k, ...ORIGINS[k] };
+  const name = String(city || "").trim() || k;
+  const words = name.split(/\s+/).filter(Boolean);
+  const short = (words.length > 1 ? words.map(w => w[0]).join("") : name.slice(0, 2)).toUpperCase();
+  return { license: k, name, short: name ? short : "" };
+}
+export const originRank = lic => { const i = Object.keys(ORIGINS).indexOf(String(lic || "").toUpperCase()); return i < 0 ? 99 : i; };
+// The manifest/WTI sets that make up a stop (older runs have just manifestNo/invoiceNo on the stop).
+export const stopSets = s => (s.sets && s.sets.length ? s.sets : s.manifestNo ? [{ manifestNo: s.manifestNo, invoiceNo: s.invoiceNo || "" }] : []);
+export const stopManifestNos = s => stopSets(s).flatMap(x => String(x.manifestNo || "").split(/[,\s]+/)).filter(Boolean);
+export const setText = x => `${x.origin ? x.origin + ": " : ""}Manifest ${x.manifestNo || "—"}${x.invoiceNo ? ` · WTI ${x.invoiceNo}` : ""}`;
+export const multiOrigin = s => new Set((s.packages || []).map(p => p.origin).filter(Boolean)).size > 1;
+// "LV Box 3" when a stop has boxes from two facilities (each WTI numbers its boxes from 1), else "Box 3"
+export const boxLabel = (p, multi) => (p.box ? `${multi && p.originShort ? p.originShort + " " : ""}Box ${p.box}` : "");
 export const manifestNos = m => {
-  const l = [...new Set((m.stops || []).map(s => s.manifestNo).filter(Boolean))];
+  const l = [...new Set((m.stops || []).flatMap(stopManifestNos))];
   return l.length ? l : m.manifestNo ? [m.manifestNo] : [];
 };
 export const runTitle = m => m.title || [m.truck, fmtDate(m.date)].filter(Boolean).join(" · ") || (m.manifestNo ? `Manifest ${m.manifestNo}` : "Delivery");
