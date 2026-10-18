@@ -134,6 +134,12 @@ async function firebaseStore() {
         await A.signOut(secAuth);
       } finally { await appM.deleteApp(sec).catch(() => {}); }
     },
+    // An admin changes their own password (Firebase wants the current one again first).
+    async changePassword(current, next) {
+      const u = auth.currentUser;
+      await A.reauthenticateWithCredential(u, A.EmailAuthProvider.credential(u.email, current));
+      await A.updatePassword(u, next);
+    },
     // Removing an admin takes away their office access (their old login no longer opens anything).
     removeAdmin: id => F.deleteDoc(F.doc(db, "users", id)),
     setDriver: (id, patch) => F.updateDoc(F.doc(db, "users", id), patch),
@@ -249,6 +255,7 @@ function demoStore(role) {
     watchTruckRuns: (truck, cb) => watch(() => cb(arr(st.manifests, m => m.truck === truck))),
     watchAdmins: cb => watch(() => cb(arr(st.users, u => u.role === "admin"))),
     removeAdmin: async id => { delete st.users[id]; save(); },
+    changePassword: async () => {},
     myAdmin: async () => null,
     async addAdmin({ name, username }) { st.users[uid("u")] = { name, username, role: "admin", active: true, createdAt: Date.now() }; save(); },
     watchManifest: (id, cb) => watch(() => cb(st.manifests[id] ? { id, ...st.manifests[id] } : null, false)),

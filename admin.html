@@ -559,6 +559,27 @@ function driversView() {
               if (A.admins.length <= 1) { alert("Keep at least one admin."); return; }
               if (!confirm(`Remove ${x.name || "this admin"}? They won't be able to open the office page anymore. (You can add them back later with the same username and password.)`)) return;
               try { await A.store.removeAdmin(x.id); } catch (err) { onErr(err); } } }, "Remove"))),
+      (() => {   // change your own password
+        const f = A.pw ||= { cur: "", n1: "", n2: "", msg: "" };
+        if (!f.open) return h("button", { type: "button", class: "linkbtn", onclick: () => { A.pw = { cur: "", n1: "", n2: "", msg: "", open: true }; render(); } }, "Change my password");
+        const save = async e => {
+          e.preventDefault();
+          if (f.n1.length < 6) { f.msg = "The new password needs at least 6 characters."; return render(); }
+          if (f.n1 !== f.n2) { f.msg = "The new passwords don't match."; return render(); }
+          f.msg = "Saving…"; render();
+          try { await A.store.changePassword(f.cur, f.n1); A.pw = { msg: "✓ Password changed." }; render(); }
+          catch (err) { f.msg = /wrong-password|invalid-credential/.test(err.code || "") ? "Your current password isn't right." : /too-many/.test(err.code || "") ? "Too many tries. Wait a few minutes." : friendlyError(err); render(); }
+        };
+        return h("form", { onsubmit: save, style: { marginTop: "12px", maxWidth: "360px" } },
+          h("h3", null, "Change my password"),
+          h("label", { class: "f" }, "Current password", h("input", { type: "password", "data-k": "pw-c", autocomplete: "current-password", value: f.cur, oninput: e => { f.cur = e.target.value; } })),
+          h("label", { class: "f" }, "New password", h("input", { type: "password", "data-k": "pw-1", autocomplete: "new-password", value: f.n1, oninput: e => { f.n1 = e.target.value; } })),
+          h("label", { class: "f" }, "New password again", h("input", { type: "password", "data-k": "pw-2", autocomplete: "new-password", value: f.n2, oninput: e => { f.n2 = e.target.value; } })),
+          h("div", { class: "btns", style: { marginTop: "10px" } }, h("button", { class: "primary" }, "Save"),
+            h("button", { type: "button", class: "small", onclick: () => { A.pw = null; render(); } }, "Cancel")),
+          f.msg ? h("div", { class: f.msg === "Saving…" ? "hint" : "err", style: { marginTop: "8px" } }, f.msg) : null);
+      })(),
+      A.pw && A.pw.msg && !A.pw.open ? h("div", { class: "hint picked" }, A.pw.msg) : null,
       h("p", { class: "meta" }, "Admins can use the driver app too: open it on the same phone or computer while signed in here, and you're signed in as yourself.")),
     h("form", { class: "card", onsubmit: async e => {
         e.preventDefault();
