@@ -123,25 +123,23 @@ function loginView() {
   const order = c => { const i = KNOWN_TRUCKS.findIndex(t => t.code === c); return i < 0 ? 99 : i; };
   const trucks = [...byCode.values()].sort((a, b) => order(a.code) - order(b.code) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
   const start = code => { const c = String(code || "").trim().toUpperCase(); if (c) setDriver({ truck: c, name: S.pickName.trim() }); };
-  const me = personKey(S.pickName);
-  const myTruck = me && (trucks.find(t => (t.crew || []).some(c => personKey(c.name) === me)) || {}).code;
-  // the dropdown: everyone on every truck, grouped by truck
+  // one plain A–Z list of every driver; which truck they're in today is picked separately below
+  const people = mergeCrew(trucks.flatMap(t => t.crew || [])).map(c => c.name).sort((a, b) => a.localeCompare(b));
+  const me = personKey(S.pickName), listed = people.some(n => personKey(n) === me);
   const nameSel = h("select", { "data-k": "dname", class: "namesel", onchange: e => { S.pickName = e.target.value; render(); } },
     h("option", { value: "", selected: !S.pickName }, "Choose your name…"),
-    trucks.filter(t => (t.crew || []).length).map(t => h("optgroup", { label: `${t.code}${t.nickname ? " · " + t.nickname : ""}` },
-      t.crew.map(c => h("option", { value: c.name, selected: personKey(c.name) === me }, c.name)))),
-    S.pickName && !myTruck ? h("option", { value: S.pickName, selected: true }, S.pickName) : null);
+    people.map(n => h("option", { value: n, selected: !!me && personKey(n) === me }, n)),
+    S.pickName && !listed ? h("option", { value: S.pickName, selected: true }, S.pickName) : null);
   return h("div", { class: "pick" },
     h("label", { class: "f pick-name" }, "Who are you?", nameSel),
     h("h2", { class: "pick-q" }, "Which truck are you on?"),
     h("div", { class: "trucks" }, trucks.map(t => {
-      const mine = myTruck ? t.code === myTruck : t.code === S.lastTruck, crew = (t.crew || []).map(c => firstName(c.name));
-      return h("button", { type: "button", class: "truck" + (mine ? " last" : ""), onclick: () => start(t.code) },
+      const last = t.code === S.lastTruck;
+      return h("button", { type: "button", class: "truck" + (last ? " last" : ""), onclick: () => start(t.code) },
         h("span", { class: "tcode" }, t.code),
         h("span", { class: "tinfo" },
           h("span", { class: "tname" }, t.nickname || `Truck ${t.code}`),
-          crew.length ? h("span", { class: "tcrew" }, crew.join(" & ")) : null,
-          mine ? h("span", { class: "chip ok tlast" }, myTruck ? "Your truck" : "Last used") : null),
+          last ? h("span", { class: "chip ok tlast" }, "Last used") : null),
         h("span", { class: "tgo", "aria-hidden": "true" }, "›"));
     })),
     S.other
