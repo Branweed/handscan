@@ -491,6 +491,14 @@ export function parseTable(rows) {
   return out;
 }
 
+// A long batch name can wrap across lines in a PDF, so one side may hold only a piece of it
+// (or pick up a stray number from the next column). Treat a piece of the same batch as a match.
+const batchKey = b => String(b || "").toUpperCase().replace(/\s+/g, "");
+function sameBatch(a, b) {
+  const x = batchKey(a), y = batchKey(b);
+  if (!x || !y || x === y) return true;
+  return x.includes(y) || y.includes(x);
+}
 /* ======================= tidy up one file ======================= */
 const countPkgs = r => (r.stops || []).reduce((n, s) => n + s.packages.length, 0);
 const cleanItem = t => String(t || "").replace(/\b(?:Shp|Shipped|Rcv|Received)\s*:\s*[\d.,]+\s*[A-Za-z]*/gi, " ")
@@ -581,7 +589,7 @@ export function combine(input) {
       if (!p) { warnings.push(`⚠ ${label(inv)} lists ${ip.tag} (${ip.item || "no name"}) but manifest ${inv.manifestNo} doesn't.`); continue; }
       if (ip.box) p.box = ip.box;
       if (!p.batch && ip.batch) p.batch = ip.batch;
-      else if (ip.batch && p.batch && ip.batch.toUpperCase() !== p.batch.toUpperCase()) warnings.push(`${ip.tag}: batch is ${p.batch} on the manifest but ${ip.batch} on the WTI.`);
+      else if (ip.batch && p.batch && !sameBatch(p.batch, ip.batch)) warnings.push(`${ip.tag}: batch is ${p.batch} on the manifest but ${ip.batch} on the WTI.`);
       if (!p.item && ip.item) p.item = ip.item;
       if (ip.qty && p.qty && !qtyMatches(p, ip)) warnings.push(`⚠ ${ip.tag}: quantity is ${p.qty} ${p.uom} on the manifest but ${ip.qty} ${ip.uom} on ${label(inv)}.`);
     }
