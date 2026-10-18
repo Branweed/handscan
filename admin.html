@@ -77,13 +77,13 @@ table.res th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-s
 <main id="app"><div class="empty">Loading…</div></main>
 <script type="module">
 import { DEMO, h, swap, uid, normalizeTag, looksLikeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, plural, downloadCsv,
-  friendlyError, manifestNos, runTitle, crewNames, firstName, vehicleInfo, adminEmail, stopSets, stopManifestNos, setText, multiOrigin, boxLabel, ORIGINS, mergeCrew, personKey, LOAD, loadSummary } from "./shared.js";
+  friendlyError, manifestNos, runTitle, crewNames, firstName, vehicleInfo, adminEmail, stopSets, stopManifestNos, setText, multiOrigin, boxLabel, ORIGINS, mergeCrew, personKey, whoKey, LOAD, loadSummary } from "./shared.js";
 import { createStore } from "./store.js";
 
 const root = document.getElementById("app"), $ = id => document.getElementById(id);
 const A = { store: null, user: undefined, profile: undefined, tab: "upload", admins: [], manifests: [], draft: null, busy: "", error: "",
   openId: null, openScans: [], showArchived: false, showRaw: false, newAdmin: null, trucksDb: [], unsub: {},
-  access: undefined, devices: [], driverNames: undefined, trucksLoaded: false, seeded: false, accDraft: "", nameDraft: "" };
+  access: undefined, devices: [], pins: [], driverNames: undefined, trucksLoaded: false, seeded: false, accDraft: "", nameDraft: "" };
 
 (async () => {
   try { A.store = await createStore("admin"); }
@@ -101,6 +101,7 @@ const A = { store: null, user: undefined, profile: undefined, tab: "upload", adm
         const needRules = k => e => { console.warn(e); A[k] = "rules"; render(); };
         A.unsub.a = A.store.watchAccess(a => { A.access = a; render(); }, needRules("access"));
         A.unsub.v = A.store.watchDevices(l => { A.devices = l; render(); }, needRules("devices"));
+        A.unsub.pn = A.store.watchPins(l => { A.pins = l; render(); }, e => { console.warn(e); A.pins = "rules"; render(); });
         A.unsub.n = A.store.watchDriverNames(n => { A.driverNames = n; seedDriverNames(); render(); }, needRules("driverNames"));
       }
       render();
@@ -449,7 +450,7 @@ function accessCard() {
   };
   return h("div", { class: "card" },
     h("h2", { class: "title", style: { marginTop: 0 } }, "Phone access"),
-    h("p", { class: "meta", style: { marginTop: 0 } }, "Each phone enters this code once to see runs. Anyone without it sees nothing, even with the link."),
+    h("p", { class: "meta", style: { marginTop: 0 } }, "Office code: each driver uses it once, the first time they sign in, then makes their own PIN. After that only their PIN works for them. Anyone without one sees nothing, even with the link."),
     a === "rules" || A.devices === "rules" ? rulesNote()
       : a === undefined ? h("div", { class: "meta" }, "Loading…")
       : has ? h("div", null, "Company code: ", h("span", { class: "bigcode" }, a.code))
@@ -458,16 +459,16 @@ function accessCard() {
       h("input", { "data-k": "acc", value: A.accDraft, inputmode: "numeric", placeholder: has ? "New code (4–8 digits)" : "4–8 digits", oninput: e => { A.accDraft = e.target.value; } }),
       h("button", { class: "primary" }, has ? "Change" : "Set code")),
     Array.isArray(A.devices) ? [
-      h("h3", null, `Phones set up (${A.devices.length})`),
+      h("h3", null, `Signed-in phones (${A.devices.length})`),
       A.devices.length ? A.devices.map(d => h("div", { class: "pkg" },
         h("div", { class: "ic" }, "📱"),
-        h("div", { class: "main" }, h("div", { class: "name" }, d.name || "Phone"), h("div", { class: "meta" }, d.at ? `Set up ${new Date(d.at).toLocaleString()}` : "")),
-        h("button", { class: "small", onclick: () => { if (confirm("Remove this phone? It will need the code again.")) A.store.removeDevice(d.id).catch(onErr); } }, "Remove")))
+        h("div", { class: "main" }, h("div", { class: "name" }, d.name || "Phone"), h("div", { class: "meta" }, d.at ? `Signed in ${new Date(d.at).toLocaleString()}` : "")),
+        h("button", { class: "small", onclick: () => { if (confirm(`Sign ${d.name || "this phone"} out of that phone? They'll sign in again with their PIN.`)) A.store.removeDevice(d.id).catch(onErr); } }, "Sign out")))
         : h("div", { class: "meta" }, "None yet."),
       A.devices.length ? h("button", { class: "small danger", style: { marginTop: "10px" }, onclick: async () => {
-        if (!confirm(`Remove all ${A.devices.length} phones? Every phone will have to enter the code again.`)) return;
+        if (!confirm(`Sign out all ${A.devices.length} phones? Every driver will sign in again with their PIN.`)) return;
         try { await A.store.removeAllDevices(); } catch (err) { onErr(err); }
-      } }, "Remove all phones") : null] : null);
+      } }, "Sign out all phones") : null] : null);
 }
 function namesCard() {
   const n = A.driverNames;
@@ -484,7 +485,12 @@ function namesCard() {
     h("h2", { class: "title", style: { marginTop: 0 } }, "Drivers"),
     h("p", { class: "meta", style: { marginTop: 0 } }, "The names drivers pick from on their phone. Names on uploaded manifests are added automatically. Any driver can pick any truck."),
     list.length ? list.map(x => h("div", { class: "pkg" },
-      h("div", { class: "main" }, h("div", { class: "name" }, x)),
+      h("div", { class: "main" }, h("div", { class: "name" }, x),
+        Array.isArray(A.pins) ? h("div", { class: "meta" }, A.pins.includes(whoKey(x)) ? "🔑 Has own PIN" : "No PIN yet — signs in the first time with the office code") : null),
+      Array.isArray(A.pins) && A.pins.includes(whoKey(x)) ? h("button", { class: "small", onclick: async () => {
+        if (!confirm(`Reset ${x}'s PIN? They'll be signed out, then sign in once with the office code and make a new PIN.`)) return;
+        try { await A.store.resetPin(whoKey(x)); } catch (err) { onErr(err); }
+      } }, "Reset PIN") : null,
       h("button", { class: "small", onclick: () => {
         if (!confirm(`Take ${x} off the list?`)) return;
         A.store.setDriverNames((n || []).filter(y => personKey(y) !== personKey(x))).catch(onErr);

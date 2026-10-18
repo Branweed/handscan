@@ -14,7 +14,8 @@
  *                                  stopId "load" = a load-check scan at the dock; stopsDone.load = load check finished
  *   settings/access                { code }            office-only: the company code phones enter once
  *   trucks/_drivers                { names[] }         the "Who are you?" list (kept beside the trucks; not a truck)
- *   devices/{uid}                  { code, at, name }  one per approved phone (anonymous sign-in); the office can remove them
+ *   devices/{uid}                  { who, name, at, pin|code }  one per phone: which driver is signed in on it
+ *   pins/{who}                     { pin, at }         each driver's own PIN (who = "james_stewart"); office can reset
  */
 import { firebaseConfig, DEMO, uid, driverEmail, makePin, adminEmail } from "./shared.js";
 
@@ -47,12 +48,28 @@ async function firebaseStore() {
       if (!auth.currentUser) { try { await A.signInAnonymously(auth); } catch (e) { console.warn("anonymous sign-in unavailable", e.code || e); } }
       return auth.currentUser;
     },
-    async approvePhone(code, name) {
+    // Which driver is signed in on this phone (null if none).
+    async myDevice() {
+      if (!auth.currentUser) return null;
+      try { const s = await F.getDoc(F.doc(db, "devices", auth.currentUser.uid)); return s.exists() ? s.data() : null; } catch (e) { return null; }
+    },
+    // Sign a driver in on this phone with their own PIN — or, the first time (no PIN yet), the office code.
+    // Resolves "pin" or "code" (= first time: make a PIN next). Rejects permission-denied if neither fits.
+    async driverSignIn(who, name, secret) {
       if (!auth.currentUser) {
         try { await A.signInAnonymously(auth); }
         catch (e) { const err = new Error("Phone sign-in isn't turned on yet. In Firebase: Authentication → Sign-in method → Anonymous → Enable."); err.code = "setup"; throw err; }
       }
-      await F.setDoc(F.doc(db, "devices", auth.currentUser.uid), { code: String(code).trim(), at: Date.now(), name: String(name || "").slice(0, 80) });
+      const ref = F.doc(db, "devices", auth.currentUser.uid), base = { who, name: String(name || "").slice(0, 80), at: Date.now() };
+      try { await F.setDoc(ref, { ...base, pin: String(secret) }); return "pin"; }
+      catch (e) { if (e.code !== "permission-denied") throw e; }
+      await F.setDoc(ref, { ...base, code: String(secret) });
+      return "code";
+    },
+    // Make or change this driver's PIN (the phone must be signed in as them), then keep this phone signed in with it.
+    async savePin(who, name, pin) {
+      await F.setDoc(F.doc(db, "pins", who), { pin: String(pin), at: Date.now() });
+      await F.setDoc(F.doc(db, "devices", auth.currentUser.uid), { who, name, pin: String(pin), at: Date.now() });
     },
     watchDriverNames: (cb, err) => F.onSnapshot(F.doc(db, "trucks", "_drivers"), s => cb(s.exists() ? (s.data().names || []) : null), err),
 
@@ -110,6 +127,12 @@ async function firebaseStore() {
     setAccessCode: code => F.setDoc(F.doc(db, "settings", "access"), { code: String(code).trim(), updatedAt: Date.now() }),
     watchDevices: (cb, err) => F.onSnapshot(F.collection(db, "devices"), s => cb(list(s).sort((a, b) => (b.at || 0) - (a.at || 0))), err),
     removeDevice: id => F.deleteDoc(F.doc(db, "devices", id)),
+    watchPins: (cb, err) => F.onSnapshot(F.collection(db, "pins"), s => cb(s.docs.map(d => d.id)), err),   // only who has one, never the PIN
+    async resetPin(who) {
+      await F.deleteDoc(F.doc(db, "pins", who));
+      const s = await F.getDocs(F.query(F.collection(db, "devices"), F.where("who", "==", who)));
+      for (const d of s.docs) await F.deleteDoc(d.ref);
+    },
     async removeAllDevices() {
       const s = await F.getDocs(F.collection(db, "devices"));
       for (let i = 0; i < s.docs.length; i += 400) { const b = F.writeBatch(db); s.docs.slice(i, i + 400).forEach(d => b.delete(d.ref)); await b.commit(); }
@@ -187,7 +210,17 @@ function demoStore(role) {
     onUser(cb) { setTimeout(() => cb({ uid: me, email: st.users[me].email }), 0); return () => {}; },
     signIn: async () => {}, signOut: async () => {}, resetPassword: async () => {},
     ready: async () => ({ uid: me }),
-    async approvePhone(code, name) { (st.devices ||= {})[me] = { code, at: Date.now(), name }; save(); },
+    async myDevice() { return (st.devices || {})[me] || null; },
+    async driverSignIn(who, name, secret) {
+      const pins = st.pins ||= {}, access = (st.settings && st.settings.access) || {};
+      const deny = () => { const e = new Error("Missing or insufficient permissions."); e.code = "permission-denied"; return e; };
+      if (pins[who]) { if (pins[who] !== String(secret)) throw deny(); (st.devices ||= {})[me] = { who, name, pin: String(secret), at: Date.now() }; save(); return "pin"; }
+      if (!access.code || access.code !== String(secret)) throw deny();
+      (st.devices ||= {})[me] = { who, name, code: String(secret), at: Date.now() }; save(); return "code";
+    },
+    async savePin(who, name, pin) { (st.pins ||= {})[who] = String(pin); (st.devices ||= {})[me] = { who, name, pin: String(pin), at: Date.now() }; save(); },
+    watchPins: cb => watch(() => cb(Object.keys(st.pins || {}))),
+    async resetPin(who) { delete (st.pins || {})[who]; for (const [k, d] of Object.entries(st.devices || {})) if (d.who === who) delete st.devices[k]; save(); },
     watchDriverNames: cb => watch(() => cb(st.settings && st.settings.drivers ? st.settings.drivers.names : null)),
     watchAccess: cb => watch(() => cb(st.settings && st.settings.access || null)),
     async setAccessCode(code) { ((st.settings ||= {}).access = { code }); save(); },

@@ -142,6 +142,8 @@ export const KNOWN_TRUCKS = [
 // One person = one entry: "James M. Stewart", "James Stewart" and "JAMES STEWART" all match (first + last name, middle initials ignored),
 // and so does the same Employee ID. Keeps the fullest name and any ID seen.
 export const personKey = n => { const w = String(n || "").toLowerCase().replace(/[^a-z\s'-]/g, " ").split(/\s+/).filter(x => x.length > 1); return w.length ? w[0] + " " + w[w.length - 1] : ""; };
+// The ID a driver's PIN is filed under: "James M. Stewart" → "james_stewart" (same person however the name is written).
+export const whoKey = n => personKey(n).replace(/\s+/g, "_");
 export function mergeCrew(list) {
   const out = [];
   for (const c of list || []) {

@@ -129,3 +129,5 @@ label.f>input,label.f>select{margin-top:4px}
 .codein{font-size:22px !important;letter-spacing:.2em;text-align:center;font-family:ui-monospace,Menlo,Consolas,monospace !important}
 .bigcode{font:800 22px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.15em}
 .hint.picked{color:var(--ok);font-weight:700}
+.mebar{padding:14px 16px;margin-bottom:6px}
+.mebar .linkbtn{margin-top:2px;min-height:34px}

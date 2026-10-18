@@ -35,14 +35,15 @@
 <main id="app"><div class="empty">Loading…</div></main>
 <script type="module">
 import { DEMO, h, swap, normalizeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, RESULT, plural, friendlyError,
-  runTitle, manifestNos, crewNames, firstName, stopSets, setText, multiOrigin, boxLabel, KNOWN_TRUCKS, mergeCrew, personKey, LOAD, loadSummary } from "./shared.js";
+  runTitle, manifestNos, crewNames, firstName, stopSets, setText, multiOrigin, boxLabel, KNOWN_TRUCKS, mergeCrew, personKey, whoKey, LOAD, loadSummary } from "./shared.js";
 import { createStore } from "./store.js";
 import { scanMany, signal } from "./barcode-scanner.js";
 
 const root = document.getElementById("app"), $ = id => document.getElementById(id);
 // Formats Metrc tags and company labels are printed in. QR codes are read even if they hold a URL around the tag.
 const FORMATS = ["code_128", "qr_code", "data_matrix", "code_39", "pdf417"];
-const S = { store: null, driver: undefined, trucks: [], driverNames: null, locked: false, unlockMsg: "", unlockCode: "", pick: "", pickName: "", manifests: [], error: "",
+const S = { store: null, driver: undefined, trucks: [], driverNames: null, locked: false, me: null,
+  si: { active: false, name: "", secret: "", msg: "" }, np: { active: false, first: false, p1: "", p2: "", msg: "" }, pick: "", pickName: "", manifests: [], error: "",
   mid: null, manifest: undefined, scans: [], pending: 0, local: new Map(), last: null, code: "", unsub: {} };
 
 /* ---------------- start up ---------------- */
@@ -54,7 +55,7 @@ const crewCount = m => (m.driverNames || []).length;
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 (async () => {
-  try { S.store = await createStore("driver"); await S.store.ready(); }
+  try { S.store = await createStore("driver"); await S.store.ready(); S.me = await S.store.myDevice(); if (S.me) S.pickName = S.me.name || ""; }
   catch (e) { swap(root, h("div", { class: "card empty" }, "Couldn't start the app. Connect to the internet once and reload — after that it works offline.")); return; }
   startWatching();
   const saved = loadDriver();
@@ -76,42 +77,83 @@ function onErr(e) { if (isLockedErr(e)) return lockPhone(); console.warn(e); S.e
 
 /* ---------------- this phone's access: approved once with the company code ---------------- */
 const isLockedErr = e => !!e && (e.code === "permission-denied" || /permission/i.test(e.message || ""));
-function lockPhone() { if (!S.locked) { S.locked = true; render(); } }
+function lockPhone() { if (!S.locked) { S.locked = true; S.me = null; render(); } }
 function startWatching() {
   ["trucks", "names"].forEach(k => { S.unsub[k] && S.unsub[k](); S.unsub[k] = null; });
   S.unsub.trucks = S.store.watchTrucks(l => { S.trucks = l.filter(t => !String(t.id || "").startsWith("_")); S.locked = false; if (!S.driver) render(); }, e => isLockedErr(e) ? lockPhone() : console.warn(e));
   S.unsub.names = S.store.watchDriverNames(n => { S.driverNames = n; if (onPicker()) render(); }, () => {});
 }
-async function unlock(e) {
+/* ---------------- driver sign-in: own PIN (first time: the office code, then make a PIN) ---------------- */
+const busy = msg => msg === "Checking…" || msg === "Saving…";
+async function doSignIn(e) {
   e.preventDefault();
-  const code = S.unlockCode.trim();
-  if (!code) { S.unlockMsg = "Type the code from the office."; return render(); }
-  if (!navigator.onLine) { S.unlockMsg = "Connect to the internet to unlock this phone (only needed once)."; return render(); }
-  S.unlockMsg = "Checking…"; render();
+  const name = S.si.name, secret = S.si.secret.trim();
+  if (!name) { S.si.msg = "Pick your name first."; return render(); }
+  if (!/^\d{4,8}$/.test(secret)) { S.si.msg = "Type your PIN (or the office code if it's your first time)."; return render(); }
+  if (!navigator.onLine) { S.si.msg = "Connect to the internet to sign in."; return render(); }
+  S.si.msg = "Checking…"; render();
   try {
-    await Promise.race([S.store.approvePhone(code, S.pickName), new Promise((_, rej) => setTimeout(() => rej(new Error("slow")), 15000))]);
-    Object.assign(S, { locked: false, unlockMsg: "", unlockCode: "", error: "" });
-    startWatching(); setDriver(S.driver);
+    const how = await Promise.race([S.store.driverSignIn(whoKey(name), name, secret), new Promise((_, rej) => setTimeout(() => rej(new Error("slow")), 20000))]);
+    S.me = { who: whoKey(name), name }; S.pickName = name;
+    S.si = { active: false, name: "", secret: "", msg: "" };
+    if (how === "code") S.np = { active: true, first: true, p1: "", p2: "", msg: "" };
+    S.locked = false; S.error = ""; startWatching(); setDriver(null); location.hash = "";
   } catch (err) {
-    S.unlockMsg = err.code === "setup" ? err.message : isLockedErr(err) ? "That code isn't right. Check with the office." : err.message === "slow" ? "No answer — check your signal and try again." : friendlyError(err);
+    S.si.msg = err.code === "setup" ? err.message : isLockedErr(err) ? `That isn't ${firstName(name)}'s PIN. First time? Use the office code. Forgot it? Ask the office to reset it.`
+      : err.message === "slow" ? "No answer — check your signal and try again." : friendlyError(err);
     render();
   }
 }
-function lockView() {
+function signInView() {
+  const names = mergeCrew((S.driverNames || []).map(name => ({ name }))).map(c => c.name).sort((a, b) => a.localeCompare(b));
   return h("div", { class: "pick" },
     h("div", { class: "card lockcard" },
       h("div", { class: "lockic" }, "🔒"),
-      h("h2", { class: "pick-q", style: { marginTop: "4px" } }, "Set up this phone"),
-      h("p", { class: "meta", style: { marginTop: 0 } }, "Enter the company code from the office. You only do this once on each phone."),
-      h("form", { class: "manual", onsubmit: unlock },
-        h("input", { "data-k": "unlock", value: S.unlockCode, inputmode: "numeric", autocomplete: "one-time-code", placeholder: "Company code", class: "codein",
-          oninput: e => { S.unlockCode = e.target.value; } }),
-        h("button", { class: "primary" }, "Unlock")),
-      S.unlockMsg ? h("div", { class: S.unlockMsg === "Checking…" ? "hint" : "err", style: { marginTop: "10px" } }, S.unlockMsg) : null),
+      h("h2", { class: "pick-q", style: { marginTop: "4px" } }, "Sign in"),
+      h("form", { onsubmit: doSignIn, style: { textAlign: "left" } },
+        h("label", { class: "f pick-name" }, "Who are you?",
+          h("select", { class: "namesel", "data-k": "siname", onchange: e => { S.si.name = e.target.value; S.si.msg = ""; render(); } },
+            h("option", { value: "", selected: !S.si.name }, names.length ? "Choose your name…" : "No names yet — ask the office"),
+            names.map(n => h("option", { value: n, selected: n === S.si.name }, n)))),
+        h("label", { class: "f pick-name", style: { marginTop: "14px" } }, "Your PIN",
+          h("input", { "data-k": "sipin", type: "password", inputmode: "numeric", autocomplete: "off", value: S.si.secret, class: "codein", placeholder: "••••",
+            oninput: e => { S.si.secret = e.target.value; } })),
+        h("div", { class: "hint" }, "First time? Use the code the office gave you. Then you'll make your own PIN."),
+        h("button", { class: "primary big", style: { marginTop: "14px" }, disabled: busy(S.si.msg) }, "Sign in")),
+      S.si.msg ? h("div", { class: busy(S.si.msg) ? "hint" : "err", style: { marginTop: "10px" } }, S.si.msg) : null,
+      S.si.active && !S.locked ? h("button", { type: "button", class: "linkbtn", onclick: () => { S.si = { active: false, name: "", secret: "", msg: "" }; render(); } }, "Cancel") : null),
     h("div", { class: "pick-sep" }),
     h("a", { class: "btn big office", href: "admin.html#office" }, "🔒  Office / Admin"));
 }
-
+async function doSavePin(e) {
+  e.preventDefault();
+  const { p1, p2 } = S.np;
+  if (!/^\d{4,6}$/.test(p1)) { S.np.msg = "Use 4 to 6 numbers."; return render(); }
+  if (p1 !== p2) { S.np.msg = "The two PINs don't match. Type them again."; S.np.p2 = ""; return render(); }
+  if (!navigator.onLine) { S.np.msg = "Connect to the internet to save your PIN."; return render(); }
+  S.np.msg = "Saving…"; render();
+  try {
+    await S.store.savePin(S.me.who, S.me.name, p1);
+    S.np = { active: false, first: false, p1: "", p2: "", msg: "" };
+    S.pinSaved = true; render(); setTimeout(() => { S.pinSaved = false; render(); }, 4000);
+  } catch (err) { S.np.msg = isLockedErr(err) ? "Couldn't save it. Sign in again and retry." : friendlyError(err); render(); }
+}
+function pinView() {
+  const first = S.np.first;
+  return h("div", { class: "pick" },
+    h("div", { class: "card lockcard" },
+      h("div", { class: "lockic" }, "🔑"),
+      h("h2", { class: "pick-q", style: { marginTop: "4px" } }, first ? `Make your PIN, ${firstName(S.me.name)}` : "Change your PIN"),
+      h("p", { class: "meta", style: { marginTop: 0 } }, first ? "4 to 6 numbers. You'll use it to sign in from now on — the office code won't work for you anymore." : "4 to 6 numbers."),
+      h("form", { onsubmit: doSavePin, style: { textAlign: "left" } },
+        h("label", { class: "f pick-name" }, first ? "New PIN" : "New PIN",
+          h("input", { "data-k": "p1", type: "password", inputmode: "numeric", autocomplete: "new-password", class: "codein", value: S.np.p1, oninput: e => { S.np.p1 = e.target.value; } })),
+        h("label", { class: "f pick-name", style: { marginTop: "12px" } }, "Type it again",
+          h("input", { "data-k": "p2", type: "password", inputmode: "numeric", autocomplete: "new-password", class: "codein", value: S.np.p2, oninput: e => { S.np.p2 = e.target.value; } })),
+        h("button", { class: "primary big", style: { marginTop: "14px" }, disabled: busy(S.np.msg) }, "Save my PIN")),
+      S.np.msg ? h("div", { class: busy(S.np.msg) ? "hint" : "err", style: { marginTop: "10px" } }, S.np.msg) : null,
+      first ? null : h("button", { type: "button", class: "linkbtn", onclick: () => { S.np = { active: false, first: false, p1: "", p2: "", msg: "" }; render(); } }, "Cancel")));
+}
 // No hash = the first screen (name + truck). "#/" = that truck's runs, "#/m/…" = a run.
 const onPicker = () => !location.hash || location.hash === "#";
 function route() {
@@ -136,7 +178,8 @@ function render() {
   $("menu").hidden = !S.driver;
   $("menu").textContent = "Trucks";
   if (S.driver === undefined) return;
-  if (S.locked) { $("menu").hidden = true; return swap(root, lockView()); }
+  if (S.np.active && S.me) { $("menu").hidden = true; return swap(root, pinView()); }
+  if (S.locked || S.si.active) { $("menu").hidden = true; return swap(root, signInView()); }
   if (!S.driver || onPicker()) { $("menu").hidden = true; return swap(root, loginView()); }
   swap(root, h("div", null,
     S.store.demo ? h("div", { class: "banner" }, "Demo mode: data stays on this device. Tap a package to pretend-scan it. ",
@@ -162,7 +205,7 @@ function loginView() {
   const order = c => { const i = KNOWN_TRUCKS.findIndex(t => t.code === c); return i < 0 ? 99 : i; };
   const trucks = [...byCode.values()].sort((a, b) => order(a.code) - order(b.code) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
   // picking a truck is a new screen, so the phone's Back button returns here
-  const start = code => { const c = String(code || "").trim().toUpperCase(); if (!c) return; setDriver({ truck: c, name: S.pickName.trim() }); location.hash = "#/"; };
+  const start = code => { const c = String(code || "").trim().toUpperCase(); if (!c) return; setDriver({ truck: c, name: (S.me ? S.me.name : S.pickName).trim() }); location.hash = "#/"; };
   // one plain A–Z list of every driver; which truck they're in today is picked separately below
   const source = S.driverNames && S.driverNames.length ? S.driverNames.map(name => ({ name })) : trucks.flatMap(t => t.crew || []);
   const people = mergeCrew(source).map(c => c.name).sort((a, b) => a.localeCompare(b));
@@ -172,9 +215,14 @@ function loginView() {
     people.map(n => h("option", { value: n, selected: !!me && personKey(n) === me }, n)),
     S.pickName && !listed ? h("option", { value: S.pickName, selected: true }, S.pickName) : null);
   return h("div", { class: "pick" },
-    h("label", { class: "f pick-name" }, "Who are you?", nameSel),
-    S.pickName ? h("div", { class: "hint picked" }, `✓ Hi ${firstName(S.pickName)} — your scans will show your name. Now tap the truck you're on today.`)
-      : h("div", { class: "hint" }, "Pick your name so the office knows who scanned. No password needed."),
+    S.me ? h("div", { class: "card mebar" },
+        h("div", { class: "rb" }, h("div", null, h("div", { class: "meta" }, "Signed in as"), h("b", { style: { fontSize: "19px" } }, S.me.name)),
+          h("button", { type: "button", class: "small", onclick: () => { S.si = { active: true, name: "", secret: "", msg: "" }; render(); } }, "Switch driver")),
+        S.pinSaved ? h("div", { class: "hint picked" }, "✓ PIN saved. Now tap the truck you're on today.")
+          : h("button", { type: "button", class: "linkbtn", onclick: () => { S.np = { active: true, first: false, p1: "", p2: "", msg: "" }; render(); } }, "Change my PIN"))
+    : [h("label", { class: "f pick-name" }, "Who are you?", nameSel),
+       S.pickName ? h("div", { class: "hint picked" }, `✓ Hi ${firstName(S.pickName)} — your scans will show your name. Now tap the truck you're on today.`)
+         : h("div", { class: "hint" }, "Pick your name so the office knows who scanned.")],
     h("h2", { class: "pick-q" }, "Which truck are you on?"),
     h("div", { class: "trucks" }, trucks.map(t => {
       const last = t.code === S.lastTruck;
@@ -190,7 +238,7 @@ function loginView() {
           h("input", { "data-k": "truck", value: S.pick, placeholder: "Truck name", autocapitalize: "characters", spellcheck: "false", style: { textTransform: "uppercase" },
             oninput: e => { S.pick = e.target.value; } }), h("button", { class: "primary" }, "Go"))
       : h("button", { type: "button", class: "linkbtn", onclick: () => { S.other = true; render(); } }, "Truck not listed?"),
-    h("div", { class: "hint" }, "No password needed. Open the app once with internet each morning so your run downloads — then it works offline."),
+    h("div", { class: "hint" }, "Open the app once with internet each morning so your run downloads — then it works offline."),
     h("div", { class: "pick-sep" }),
     h("a", { class: "btn big office", href: "admin.html#office" }, "🔒  Office / Admin"));
 }

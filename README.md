@@ -109,13 +109,15 @@ It's tuned to the Massachusetts Metrc "Marijuana Transportation Manifest" and to
 
 ## Phone access (company code)
 
-Runs are only visible to **office admins** and **phones that entered the company code** once. Someone with just the link sees nothing.
+Runs are only visible to **office admins** and **phones a driver has signed in on**. Someone with just the link sees nothing.
+
+**Driver sign-in:** pick your name + enter your own PIN. The **first time**, a driver uses the **office code** (set in the Office) and then makes their own 4–6 digit PIN; after that the office code no longer works for them. The phone stays signed in until **Switch driver**. Drivers can **Change my PIN**; the office can **Reset PIN** (Office → Trucks & phones → Drivers), after which that driver uses the office code once more and makes a new PIN.
 
 One-time setup:
 1. Firebase console → **Authentication → Sign-in method → Add new provider → Anonymous → Enable.** (Phones sign in invisibly; drivers never see it.)
 2. Firebase console → **Firestore Database → Rules** → paste all of `firestore.rules` → **Publish**.
 3. Office → **Trucks & phones** → **Phone access** → set a 4–8 digit code. Same tab: check the **Drivers** list (it starts from the crews already seen on manifests) and add anyone missing.
-4. On each phone: open the app → enter the code → done. It's remembered.
+4. On each phone: open the app → pick your name → enter the office code → make your own PIN. It stays signed in.
 
 - **Lost a phone / someone left?** Office → Trucks & phones → remove that phone, or **Remove all phones** and change the code.
 - If Chrome's site data is cleared, that phone just asks for the code again.
