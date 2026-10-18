@@ -530,11 +530,19 @@ function tagOrigin(s, r) {
 // Quantities match if the numbers are equal, OR if one side is a weight and the other a count
 // that agree through the unit size in the item name: "… 3.5g" with 87.5 g on one and 25 on the other (87.5 / 3.5 = 25).
 const GRAMS_RE = /^(g|gm|gms|gram|grams)$/i;
-export function unitGrams(item) {
-  const m = String(item || "").match(/(\d+(?:\.\d+)?)\s*(mg|g|gm|gms|grams?)\b/i);
-  if (!m) return 0;
-  const n = parseFloat(m[1]);
-  return /^mg$/i.test(m[2]) ? n / 1000 : n;
+export function unitGrams(item) { return unitSizes(item)[0] || 0; }
+// Every weight one unit could be: "Pre-Roll 0.5g x 5" → 0.5 g each, or 2.5 g for the 5-pack.
+// Pack counts: "x5", "x 5", "*5", "5x", "5 x", "5pk", "5-pack", "5 ct", "(5)".
+export function unitSizes(item) {
+  const t = String(item || "");
+  const grams = [...t.matchAll(/(\d+(?:\.\d+)?)\s*(mg|g|gm|gms|grams?)(?![a-wyz])/gi)].map(m => /^mg$/i.test(m[2]) ? parseFloat(m[1]) / 1000 : parseFloat(m[1])).filter(n => n > 0);
+  const packs = new Set();
+  for (const m of t.matchAll(/(?:^|[^\d.])(\d{1,3})\s*(?:x|×|\*|pk|pks|pack|packs|-pack|ct|count|pc|pcs)(?![a-z])/gi)) packs.add(+m[1]);
+  for (const m of t.matchAll(/(?:x|×|\*)\s*(\d{1,3})(?![\d.]|\s*(?:mg|g|gm|gms|grams?)\b)/gi)) packs.add(+m[1]);
+  for (const m of t.matchAll(/\((\d{1,3})\)/g)) packs.add(+m[1]);
+  const out = [];
+  for (const g of grams) { out.push(g); for (const k of packs) if (k > 1) out.push(g * k); }
+  return out;
 }
 export function qtyMatches(a, b) {
   const qa = Number(a.qty), qb = Number(b.qty);
@@ -542,10 +550,9 @@ export function qtyMatches(a, b) {
   if (Math.abs(qa - qb) < 1e-6) return true;
   const ga = GRAMS_RE.test(String(a.uom || "").trim()) || /^grams$/i.test(a.uom || ""), gb = GRAMS_RE.test(String(b.uom || "").trim()) || /^grams$/i.test(b.uom || "");
   if (ga === gb) return false;                        // both weights or both counts, and they differ
-  const size = unitGrams(a.item) || unitGrams(b.item);
-  if (!size) return false;
+  const sizes = [...unitSizes(a.item), ...unitSizes(b.item)];
   const [weight, count] = ga ? [qa, qb] : [qb, qa];
-  return Math.abs(weight / size - count) < 0.01;
+  return sizes.some(size => Math.abs(weight / size - count) < 0.01);
 }
 
 export function combine(input) {
