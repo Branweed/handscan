@@ -110,6 +110,7 @@ async function firebaseStore() {
     watchTrucks: (cb, err) => F.onSnapshot(F.collection(db, "trucks"), s => cb(list(s)), err),
     saveTruck: (code, { plate, nickname, crew }) => F.setDoc(F.doc(db, "trucks", code), {
       code, ...(nickname ? { nickname } : {}), ...(plate ? { plates: F.arrayUnion(plate) } : {}), ...(crew && crew.length ? { crew } : {}), updatedAt: Date.now() }, { merge: true }),
+    removeTruck: code => F.deleteDoc(F.doc(db, "trucks", code)),
     watchAdmins: (cb, err) => F.onSnapshot(F.query(F.collection(db, "users"), F.where("role", "==", "admin")), s => cb(list(s)), err),
     // A new office admin: username + password, made with a throwaway Firebase app so you stay signed in.
     async addAdmin({ name, username, password }) {
@@ -256,6 +257,7 @@ function demoStore(role) {
       if (nickname) t.nickname = nickname; if (plate && !t.plates.includes(plate)) t.plates.push(plate); if (crew && crew.length) t.crew = crew; save();
     },
     async setDriver(id, patch) { Object.assign(st.users[id], patch); save(); },
+    async removeTruck(code) { delete (st.trucks || {})[code]; save(); },
     watchAllManifests: cb => watch(() => cb(arr(st.manifests).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)))),
     async saveManifest(m) { const id = uid("m"); st.manifests[id] = m; save(); return id; },
     async updateManifest(id, patch) { Object.assign(st.manifests[id], patch, { updatedAt: Date.now() }); save(); },

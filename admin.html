@@ -83,7 +83,7 @@ import { createStore } from "./store.js";
 const root = document.getElementById("app"), $ = id => document.getElementById(id);
 const A = { store: null, user: undefined, profile: undefined, tab: "upload", admins: [], manifests: [], draft: null, busy: "", error: "",
   openId: null, openScans: [], showArchived: false, showRaw: false, newAdmin: null, trucksDb: [], unsub: {},
-  access: undefined, devices: [], pins: [], driverNames: undefined, trucksLoaded: false, seeded: false, accDraft: "", nameDraft: "" };
+  access: undefined, devices: [], pins: [], tk: { code: "", nickname: "", plate: "" }, driverNames: undefined, trucksLoaded: false, seeded: false, accDraft: "", nameDraft: "" };
 
 (async () => {
   try { A.store = await createStore("admin"); }
@@ -499,6 +499,31 @@ function namesCard() {
       h("input", { "data-k": "nm", value: A.nameDraft, placeholder: "Full name, e.g. James Jorge", style: { textTransform: "none", fontFamily: "inherit" }, oninput: e => { A.nameDraft = e.target.value; } }),
       h("button", null, "Add")));
 }
+// Add or edit a truck by hand (uploads still fill this in automatically).
+function truckForm() {
+  const t = A.tk, editing = A.trucksDb.some(x => x.code === t.code.trim().toUpperCase());
+  const save = async e => {
+    e.preventDefault();
+    const code = t.code.trim().toUpperCase().replace(/\s+/g, "");
+    if (!/^[A-Z0-9-]{1,8}$/.test(code)) { alert("Truck code: 1–8 letters or numbers, e.g. W99."); return; }
+    try { await A.store.saveTruck(code, { nickname: t.nickname.trim(), plate: t.plate.trim().toUpperCase() }); A.tk = { code: "", nickname: "", plate: "" }; render(); }
+    catch (err) { onErr(err); }
+  };
+  return h("form", { onsubmit: save, style: { marginTop: "14px", paddingTop: "12px", borderTop: "1px solid var(--line)" } },
+    h("b", null, editing ? `Edit ${t.code.toUpperCase()}` : "Add a truck"),
+    h("div", { class: "grid2", style: { marginTop: "8px" } },
+      h("label", { class: "f" }, "Code", h("input", { "data-k": "tkc", value: t.code, placeholder: "e.g. W99", style: { textTransform: "uppercase" }, oninput: e => { t.code = e.target.value; } })),
+      h("label", { class: "f" }, "Nickname", h("input", { "data-k": "tkn", value: t.nickname, placeholder: "e.g. White 99", oninput: e => { t.nickname = e.target.value; } })),
+      h("label", { class: "f" }, "License plate", h("input", { "data-k": "tkp", value: t.plate, placeholder: "e.g. X78446", style: { textTransform: "uppercase" }, oninput: e => { t.plate = e.target.value; } }))),
+    h("div", { class: "btns", style: { marginTop: "10px" } },
+      h("button", { class: "primary small" }, editing ? "Save truck" : "Add truck"),
+      editing ? h("button", { type: "button", class: "small danger", onclick: async () => {
+        const c = t.code.trim().toUpperCase();
+        if (!confirm(`Remove truck ${c}? Its runs stay; it just leaves the truck list.`)) return;
+        try { await A.store.removeTruck(c); A.tk = { code: "", nickname: "", plate: "" }; render(); } catch (err) { onErr(err); }
+      } }, "Remove truck") : null,
+      t.code || t.nickname || t.plate ? h("button", { type: "button", class: "small ghost", onclick: () => { A.tk = { code: "", nickname: "", plate: "" }; render(); } }, "Clear") : null));
+}
 function driversView() {
   const f = A.newAdmin ||= { name: "", username: "", password: "" };
   const msg = h("div", { class: "err" });
@@ -516,8 +541,10 @@ function driversView() {
           h("div", { class: "main" },
             h("div", { class: "name" }, [t.nickname, (t.plates || []).length && `plate ${t.plates.join(", ")}`].filter(Boolean).join(" · ") || c),
             h("div", { class: "meta" }, (t.crew || []).length ? `Last crew: ${mergeCrew(t.crew).map(x => x.name).join(", ")}` : "No crew seen yet")),
-          h("span", { class: "chip" }, plural(runs, "run")));
-      }) : h("div", { class: "empty" }, "No trucks yet. They appear after you send the first run.")),
+          h("span", { class: "chip" }, plural(runs, "run")),
+          h("button", { class: "small", onclick: () => { A.tk = { code: c, nickname: t.nickname || "", plate: (t.plates || [])[0] || "" }; render(); } }, "Edit"));
+      }) : h("div", { class: "empty" }, "No trucks yet."),
+      truckForm()),
     h("div", { class: "card" },
       h("h2", { class: "title", style: { marginTop: 0 } }, "Office admins"),
       A.admins.map(x => h("div", { class: "pkg" },
