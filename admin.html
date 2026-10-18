@@ -450,14 +450,14 @@ function accessCard() {
   };
   return h("div", { class: "card" },
     h("h2", { class: "title", style: { marginTop: 0 } }, "Phone access"),
-    h("p", { class: "meta", style: { marginTop: 0 } }, "Office code: each driver uses it once, the first time they sign in, then makes their own PIN. After that only their PIN works for them. Anyone without one sees nothing, even with the link."),
+    h("p", { class: "meta", style: { marginTop: 0 } }, "Company PIN: every driver types it the first time they sign in, then the app makes them pick their own PIN. After that only their own PIN works for them. Anyone without one sees nothing, even with the link."),
     a === "rules" || A.devices === "rules" ? rulesNote()
       : a === undefined ? h("div", { class: "meta" }, "Loading…")
-      : has ? h("div", null, "Company code: ", h("span", { class: "bigcode" }, a.code))
-      : h("div", { class: "banner" }, "No code set yet. Phones can't be set up until you set one."),
+      : has ? h("div", null, "Company PIN: ", h("span", { class: "bigcode" }, a.code))
+      : h("div", { class: "banner" }, "No company PIN set yet. Drivers can't sign in until you set one."),
     a === "rules" ? null : h("form", { class: "manual", style: { maxWidth: "360px" }, onsubmit: save },
-      h("input", { "data-k": "acc", value: A.accDraft, inputmode: "numeric", placeholder: has ? "New code (4–8 digits)" : "4–8 digits", oninput: e => { A.accDraft = e.target.value; } }),
-      h("button", { class: "primary" }, has ? "Change" : "Set code")),
+      h("input", { "data-k": "acc", value: A.accDraft, inputmode: "numeric", placeholder: has ? "New company PIN (4–8 digits)" : "4–8 digits", oninput: e => { A.accDraft = e.target.value; } }),
+      h("button", { class: "primary" }, has ? "Change" : "Set PIN")),
     Array.isArray(A.devices) ? [
       h("h3", null, `Signed-in phones (${A.devices.length})`),
       A.devices.length ? A.devices.map(d => h("div", { class: "pkg" },
@@ -486,15 +486,25 @@ function namesCard() {
     h("p", { class: "meta", style: { marginTop: 0 } }, "The names drivers pick from on their phone. Names on uploaded manifests are added automatically. Any driver can pick any truck."),
     list.length ? list.map(x => h("div", { class: "pkg" },
       h("div", { class: "main" }, h("div", { class: "name" }, x),
-        Array.isArray(A.pins) ? h("div", { class: "meta" }, A.pins.includes(whoKey(x)) ? "🔑 Has own PIN" : "No PIN yet — signs in the first time with the office code") : null),
+        Array.isArray(A.pins) ? h("div", { class: "meta" }, A.pins.includes(whoKey(x)) ? "🔑 Has own PIN" : "No own PIN yet — signs in with the company PIN, then picks one") : null),
       Array.isArray(A.pins) && A.pins.includes(whoKey(x)) ? h("button", { class: "small", onclick: async () => {
-        if (!confirm(`Reset ${x}'s PIN? They'll be signed out, then sign in once with the office code and make a new PIN.`)) return;
+        if (!confirm(`Reset ${x}'s PIN? They'll be signed out, then sign in once with the company PIN and pick a new one.`)) return;
         try { await A.store.resetPin(whoKey(x)); } catch (err) { onErr(err); }
       } }, "Reset PIN") : null,
       h("button", { class: "small", onclick: () => {
         if (!confirm(`Take ${x} off the list?`)) return;
         A.store.setDriverNames((n || []).filter(y => personKey(y) !== personKey(x))).catch(onErr);
       } }, "Remove"))) : h("div", { class: "meta" }, n === undefined ? "Loading…" : "No names yet."),
+    // Anyone seen on a truck or an uploaded run but not on the list (e.g. removed by mistake) can be put back in one tap.
+    (() => {
+      if (!Array.isArray(n)) return null;
+      const seen = mergeCrew([...A.trucksDb.flatMap(t => t.crew || []), ...A.manifests.flatMap(m => (m.driverNames || []).map(name => ({ name })))])
+        .map(c => c.name).filter(x => !list.some(y => personKey(y) === personKey(x))).sort((a, b) => a.localeCompare(b));
+      return seen.length ? [h("h3", null, "Removed / not on the list"),
+        h("p", { class: "meta", style: { marginTop: 0 } }, "Names from your trucks and uploaded runs. Tap Add back to put one on the list (their PIN, if they made one, still works)."),
+        seen.map(x => h("div", { class: "pkg" }, h("div", { class: "main" }, h("div", { class: "name" }, x)),
+          h("button", { class: "small", onclick: () => A.store.addDriverNames([x]).catch(onErr) }, "Add back")))] : null;
+    })(),
     h("form", { class: "manual", style: { maxWidth: "460px" }, onsubmit: add },
       h("input", { "data-k": "nm", value: A.nameDraft, placeholder: "Full name, e.g. James Jorge", style: { textTransform: "none", fontFamily: "inherit" }, oninput: e => { A.nameDraft = e.target.value; } }),
       h("button", null, "Add")));
@@ -551,7 +561,12 @@ function driversView() {
         h("div", { class: "ic" }, (x.name || "?")[0].toUpperCase()),
         h("div", { class: "main" }, h("div", { class: "name" }, x.name || "(no name)"),
           h("div", { class: "meta" }, x.username ? `Username: ${x.username}` : x.email || "")),
-        x.id === (A.user && A.user.uid) ? h("span", { class: "chip ok" }, "You") : null))),
+        x.id === (A.user && A.user.uid) ? h("span", { class: "chip ok" }, "You")
+          : h("button", { class: "small danger", onclick: async () => {
+              if (A.admins.length <= 1) { alert("Keep at least one admin."); return; }
+              if (!confirm(`Remove ${x.name || "this admin"}? They won't be able to open the office page anymore. (You can add them back later with the same username and password.)`)) return;
+              try { await A.store.removeAdmin(x.id); } catch (err) { onErr(err); } } }, "Remove"))),
+      h("p", { class: "meta" }, "Admins can use the driver app too: open it on the same phone or computer while signed in here, and you're signed in as yourself — no PIN.")),
     h("form", { class: "card", onsubmit: async e => {
         e.preventDefault();
         const un = f.username.trim();
@@ -560,7 +575,7 @@ function driversView() {
         if (f.password.length < 6) { msg.textContent = "The password needs at least 6 characters."; return; }
         msg.textContent = "Adding…";
         try { await A.store.addAdmin({ name: f.name.trim(), username: un, password: f.password }); A.newAdmin = null; render(); }
-        catch (err) { msg.textContent = /email-already-in-use/.test(err.code || "") ? "That username is already taken." : friendlyError(err); }
+        catch (err) { msg.textContent = err.code === "taken" ? err.message : /email-already-in-use/.test(err.code || "") ? "That username is already taken." : friendlyError(err); }
       } },
       h("h2", { class: "title", style: { marginTop: 0 } }, "Add an admin"),
       h("div", { class: "grid2" },

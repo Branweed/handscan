@@ -55,7 +55,9 @@ const crewCount = m => (m.driverNames || []).length;
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 (async () => {
-  try { S.store = await createStore("driver"); await S.store.ready(); S.me = await S.store.myDevice(); if (S.me) S.pickName = S.me.name || ""; }
+  try { S.store = await createStore("driver"); await S.store.ready(); S.me = (await S.store.myDevice()) || (S.store.myAdmin ? await S.store.myAdmin() : null); if (S.me) S.pickName = S.me.name || "";
+    if (S.me && !S.me.admin && S.me.code && !S.me.pin) S.np = { active: true, first: true, p1: "", p2: "", msg: "" };   // signed in with the company PIN but never made their own
+  }
   catch (e) { swap(root, h("div", { class: "card empty" }, "Couldn't start the app. Connect to the internet once and reload — after that it works offline.")); return; }
   startWatching();
   const saved = loadDriver();
@@ -83,23 +85,23 @@ function startWatching() {
   S.unsub.trucks = S.store.watchTrucks(l => { S.trucks = l.filter(t => !String(t.id || "").startsWith("_")); S.locked = false; if (!S.driver) render(); }, e => isLockedErr(e) ? lockPhone() : console.warn(e));
   S.unsub.names = S.store.watchDriverNames(n => { S.driverNames = n; if (onPicker()) render(); }, () => {});
 }
-/* ---------------- driver sign-in: own PIN (first time: the office code, then make a PIN) ---------------- */
+/* ---------------- driver sign-in: own PIN (first time: the company PIN, then pick their own) ---------------- */
 const busy = msg => msg === "Checking…" || msg === "Saving…";
 async function doSignIn(e) {
   e.preventDefault();
   const name = S.si.name, secret = S.si.secret.trim();
   if (!name) { S.si.msg = "Pick your name first."; return render(); }
-  if (!/^\d{4,8}$/.test(secret)) { S.si.msg = "Type your PIN (or the office code if it's your first time)."; return render(); }
+  if (!/^\d{4,8}$/.test(secret)) { S.si.msg = "Type your PIN (first time: the company PIN)."; return render(); }
   if (!navigator.onLine) { S.si.msg = "Connect to the internet to sign in."; return render(); }
   S.si.msg = "Checking…"; render();
   try {
     const how = await Promise.race([S.store.driverSignIn(whoKey(name), name, secret), new Promise((_, rej) => setTimeout(() => rej(new Error("slow")), 20000))]);
-    S.me = { who: whoKey(name), name }; S.pickName = name;
+    S.me = { who: whoKey(name), name, ...(how === "code" ? { code: secret } : {}) }; S.pickName = name;
     S.si = { active: false, name: "", secret: "", msg: "" };
     if (how === "code") S.np = { active: true, first: true, p1: "", p2: "", msg: "" };
     S.locked = false; S.error = ""; startWatching(); setDriver(null); location.hash = "";
   } catch (err) {
-    S.si.msg = err.code === "setup" ? err.message : isLockedErr(err) ? `That isn't ${firstName(name)}'s PIN. First time? Use the office code. Forgot it? Ask the office to reset it.`
+    S.si.msg = err.code === "setup" ? err.message : isLockedErr(err) ? `That isn't ${firstName(name)}'s PIN. First time? Use the company PIN. Forgot yours? Ask the office to reset it.`
       : err.message === "slow" ? "No answer — check your signal and try again." : friendlyError(err);
     render();
   }
@@ -115,10 +117,10 @@ function signInView() {
           h("select", { class: "namesel", "data-k": "siname", onchange: e => { S.si.name = e.target.value; S.si.msg = ""; render(); } },
             h("option", { value: "", selected: !S.si.name }, names.length ? "Choose your name…" : "No names yet — ask the office"),
             names.map(n => h("option", { value: n, selected: n === S.si.name }, n)))),
-        h("label", { class: "f pick-name", style: { marginTop: "14px" } }, "Your PIN",
+        h("label", { class: "f pick-name", style: { marginTop: "14px" } }, "PIN",
           h("input", { "data-k": "sipin", type: "password", inputmode: "numeric", autocomplete: "off", value: S.si.secret, class: "codein", placeholder: "••••",
             oninput: e => { S.si.secret = e.target.value; } })),
-        h("div", { class: "hint" }, "First time? Use the code the office gave you. Then you'll make your own PIN."),
+        h("div", { class: "hint" }, "First time? Type the company PIN. Then you'll pick your own."),
         h("button", { class: "primary big", style: { marginTop: "14px" }, disabled: busy(S.si.msg) }, "Sign in")),
       S.si.msg ? h("div", { class: busy(S.si.msg) ? "hint" : "err", style: { marginTop: "10px" } }, S.si.msg) : null,
       S.si.active && !S.locked ? h("button", { type: "button", class: "linkbtn", onclick: () => { S.si = { active: false, name: "", secret: "", msg: "" }; render(); } }, "Cancel") : null),
@@ -129,12 +131,13 @@ async function doSavePin(e) {
   e.preventDefault();
   const { p1, p2 } = S.np;
   if (!/^\d{4,6}$/.test(p1)) { S.np.msg = "Use 4 to 6 numbers."; return render(); }
+  if (S.me && S.me.code && p1 === String(S.me.code)) { S.np.msg = "Pick a PIN that's different from the company PIN."; return render(); }
   if (p1 !== p2) { S.np.msg = "The two PINs don't match. Type them again."; S.np.p2 = ""; return render(); }
   if (!navigator.onLine) { S.np.msg = "Connect to the internet to save your PIN."; return render(); }
   S.np.msg = "Saving…"; render();
   try {
     await S.store.savePin(S.me.who, S.me.name, p1);
-    S.np = { active: false, first: false, p1: "", p2: "", msg: "" };
+    S.np = { active: false, first: false, p1: "", p2: "", msg: "" }; delete S.me.code; S.me.pin = true;
     S.pinSaved = true; render(); setTimeout(() => { S.pinSaved = false; render(); }, 4000);
   } catch (err) { S.np.msg = isLockedErr(err) ? "Couldn't save it. Sign in again and retry." : friendlyError(err); render(); }
 }
@@ -143,8 +146,8 @@ function pinView() {
   return h("div", { class: "pick" },
     h("div", { class: "card lockcard" },
       h("div", { class: "lockic" }, "🔑"),
-      h("h2", { class: "pick-q", style: { marginTop: "4px" } }, first ? `Make your PIN, ${firstName(S.me.name)}` : "Change your PIN"),
-      h("p", { class: "meta", style: { marginTop: 0 } }, first ? "4 to 6 numbers. You'll use it to sign in from now on — the office code won't work for you anymore." : "4 to 6 numbers."),
+      h("h2", { class: "pick-q", style: { marginTop: "4px" } }, first ? `Welcome, ${firstName(S.me.name)}! Pick your own PIN` : "Change your PIN"),
+      h("p", { class: "meta", style: { marginTop: 0 } }, first ? "4 to 6 numbers. Use it to sign in from now on — the company PIN won't work for you anymore." : "4 to 6 numbers."),
       h("form", { onsubmit: doSavePin, style: { textAlign: "left" } },
         h("label", { class: "f pick-name" }, first ? "New PIN" : "New PIN",
           h("input", { "data-k": "p1", type: "password", inputmode: "numeric", autocomplete: "new-password", class: "codein", value: S.np.p1, oninput: e => { S.np.p1 = e.target.value; } })),
@@ -216,10 +219,10 @@ function loginView() {
     S.pickName && !listed ? h("option", { value: S.pickName, selected: true }, S.pickName) : null);
   return h("div", { class: "pick" },
     S.me ? h("div", { class: "card mebar" },
-        h("div", { class: "rb" }, h("div", null, h("div", { class: "meta" }, "Signed in as"), h("b", { style: { fontSize: "19px" } }, S.me.name)),
+        h("div", { class: "rb" }, h("div", null, h("div", { class: "meta" }, "Signed in as"), h("b", { style: { fontSize: "19px" } }, S.me.name), S.me.admin ? h("span", { class: "chip", style: { marginLeft: "8px" } }, "Office") : null),
           h("button", { type: "button", class: "small", onclick: () => { S.si = { active: true, name: "", secret: "", msg: "" }; render(); } }, "Switch driver")),
         S.pinSaved ? h("div", { class: "hint picked" }, "✓ PIN saved. Now tap the truck you're on today.")
-          : h("button", { type: "button", class: "linkbtn", onclick: () => { S.np = { active: true, first: false, p1: "", p2: "", msg: "" }; render(); } }, "Change my PIN"))
+          : S.me.admin ? null : h("button", { type: "button", class: "linkbtn", onclick: () => { S.np = { active: true, first: false, p1: "", p2: "", msg: "" }; render(); } }, "Change my PIN"))
     : [h("label", { class: "f pick-name" }, "Who are you?", nameSel),
        S.pickName ? h("div", { class: "hint picked" }, `✓ Hi ${firstName(S.pickName)} — your scans will show your name. Now tap the truck you're on today.`)
          : h("div", { class: "hint" }, "Pick your name so the office knows who scanned.")],

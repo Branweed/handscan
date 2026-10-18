@@ -4,7 +4,7 @@ rules_version = '2';
 // Who can see what:
 //   • Office admins (username + password): everything.
 //   • Signed-in phones: runs, scans and the truck list. A phone signs in invisibly (Firebase "Anonymous" sign-in);
-//     then a driver picks their name and enters their own PIN. The first time, they use the office code and make a PIN.
+//     then a driver picks their name and enters their own PIN. The first time, they use the company PIN and pick their own.
 //   • Anyone else (someone who only has the link): nothing.
 service cloud.firestore {
   match /databases/{database}/documents {

@@ -17,7 +17,7 @@
  *   devices/{uid}                  { who, name, at, pin|code }  one per phone: which driver is signed in on it
  *   pins/{who}                     { pin, at }         each driver's own PIN (who = "james_stewart"); office can reset
  */
-import { firebaseConfig, DEMO, uid, driverEmail, makePin, adminEmail } from "./shared.js";
+import { firebaseConfig, DEMO, uid, driverEmail, makePin, adminEmail, whoKey } from "./shared.js";
 
 export const FB_VERSION = "10.12.2";
 const FB = `https://www.gstatic.com/firebasejs/${FB_VERSION}/`;
@@ -52,6 +52,12 @@ async function firebaseStore() {
     async myDevice() {
       if (!auth.currentUser) return null;
       try { const s = await F.getDoc(F.doc(db, "devices", auth.currentUser.uid)); return s.exists() ? s.data() : null; } catch (e) { return null; }
+    },
+    // An office admin (signed in on admin.html in this browser) can drive too, as themselves, with no PIN.
+    async myAdmin() {
+      const u = auth.currentUser; if (!u || u.isAnonymous) return null;
+      try { const s = await F.getDoc(F.doc(db, "users", u.uid)); const p = s.exists() ? s.data() : null;
+        return p && p.role === "admin" && p.name ? { who: whoKey(p.name), name: p.name, admin: true } : null; } catch (e) { return null; }
     },
     // Sign a driver in on this phone with their own PIN — or, the first time (no PIN yet), the office code.
     // Resolves "pin" or "code" (= first time: make a PIN next). Rejects permission-denied if neither fits.
@@ -117,11 +123,19 @@ async function firebaseStore() {
       const sec = appM.initializeApp(firebaseConfig, "add-admin-" + Date.now());
       try {
         const secAuth = A.initializeAuth(sec, { persistence: A.inMemoryPersistence });
-        const cred = await A.createUserWithEmailAndPassword(secAuth, adminEmail(username), password);
+        let cred;
+        try { cred = await A.createUserWithEmailAndPassword(secAuth, adminEmail(username), password); }
+        catch (e) {   // a removed admin being added back: same username + their old password restores them
+          if (e.code !== "auth/email-already-in-use") throw e;
+          try { cred = await A.signInWithEmailAndPassword(secAuth, adminEmail(username), password); }
+          catch (e2) { const x = new Error("That username is already taken (or it's a removed admin and the password doesn't match their old one)."); x.code = "taken"; throw x; }
+        }
         await F.setDoc(F.doc(db, "users", cred.user.uid), { name, username, email: adminEmail(username), role: "admin", active: true, createdAt: Date.now() });
         await A.signOut(secAuth);
       } finally { await appM.deleteApp(sec).catch(() => {}); }
     },
+    // Removing an admin takes away their office access (their old login no longer opens anything).
+    removeAdmin: id => F.deleteDoc(F.doc(db, "users", id)),
     setDriver: (id, patch) => F.updateDoc(F.doc(db, "users", id), patch),
     // ---- office: company code, approved phones, driver list ----
     watchAccess: (cb, err) => F.onSnapshot(F.doc(db, "settings", "access"), s => cb(s.exists() ? s.data() : null), err),
@@ -234,6 +248,8 @@ function demoStore(role) {
     watchMyManifests: (id, cb) => watch(() => cb(arr(st.manifests, m => (m.driverIds || []).includes(id)))),
     watchTruckRuns: (truck, cb) => watch(() => cb(arr(st.manifests, m => m.truck === truck))),
     watchAdmins: cb => watch(() => cb(arr(st.users, u => u.role === "admin"))),
+    removeAdmin: async id => { delete st.users[id]; save(); },
+    myAdmin: async () => null,
     async addAdmin({ name, username }) { st.users[uid("u")] = { name, username, role: "admin", active: true, createdAt: Date.now() }; save(); },
     watchManifest: (id, cb) => watch(() => cb(st.manifests[id] ? { id, ...st.manifests[id] } : null, false)),
     watchScans: (mid, cb) => watch(() => cb([...(st.scans[mid] || [])], 0)),
