@@ -101,3 +101,10 @@ label.f>input,label.f>select{margin-top:4px}
 .login>.card{margin-bottom:12px}
 .truckbtns button{min-height:84px}
 .truckbtns button b{font-size:26px}
+/* first screen: one big full-width button per truck */
+.truckbtns{grid-template-columns:1fr !important;gap:12px}
+.truckbtns button{flex-direction:row !important;justify-content:space-between;min-height:76px !important;padding:0 22px;text-align:left}
+.truckbtns button b{font-size:30px !important;letter-spacing:.02em}
+.truckbtns button span{font-size:16px !important;font-weight:700}
+.login{max-width:480px}
+.login .title{font-size:22px}

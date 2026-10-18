@@ -9,6 +9,22 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
 <link rel="stylesheet" href="app.css">
+<script>
+// Chrome's "Desktop site" mode lays pages out ~980px wide on a phone, so everything looks tiny.
+// On touch phones, zoom the page back to the phone's real width.
+(function () {
+  function fit() {
+    try {
+      var d = document.documentElement, sw = screen.width, small = Math.min(screen.width, screen.height) <= 600;
+      var touch = navigator.maxTouchPoints > 0 || matchMedia("(pointer: coarse)").matches;
+      d.style.zoom = "";
+      var w = window.innerWidth;
+      if (touch && small && sw > 0 && w > sw * 1.25) d.style.zoom = (w / sw).toFixed(3);
+    } catch (e) {}
+  }
+  fit(); addEventListener("orientationchange", function () { setTimeout(fit, 300); });
+})();
+</script>
 </head>
 <body>
 <header class="top">
