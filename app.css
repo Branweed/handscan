@@ -98,3 +98,6 @@ label.f>input,label.f>select{margin-top:4px}
 .truckbtns button{flex-direction:column;min-height:72px;gap:2px}
 .truckbtns button b{font-size:22px}
 .truckbtns button span{font-size:12.5px;font-weight:600;opacity:.8}
+.login>.card{margin-bottom:12px}
+.truckbtns button{min-height:84px}
+.truckbtns button b{font-size:26px}

@@ -107,7 +107,8 @@ function loginView() {
       msg.textContent = "Signing in…";
       try { await A.store.signIn(adminEmail(user.value), pw.value); }
       catch (err) { msg.textContent = /invalid-credential|wrong-password|user-not-found|invalid-email/.test(err.code || "") ? "That username or password isn't right." : friendlyError(err); }
-    } }, h("h2", { class: "title" }, "Office sign in"), user, pw, h("button", { class: "primary big" }, "Sign in"), msg);
+    } }, h("h2", { class: "title" }, "Office sign in"), user, pw, h("button", { class: "primary big" }, "Sign in"), msg,
+      h("a", { class: "back", href: "./", style: { marginTop: "8px" } }, "← Back to the trucks"));
 }
 
 /* ======================= upload + review ======================= */

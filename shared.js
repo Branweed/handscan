@@ -132,6 +132,12 @@ export const crewNames = m => (m.driverNames && m.driverNames.length ? m.driverN
 export const driverIdsOf = m => (m.driverIds && m.driverIds.length ? m.driverIds : m.driverId ? [m.driverId] : []);
 export const firstName = n => String(n || "").trim().split(/\s+/)[0];
 /* ---------------- trucks + driver logins ---------------- */
+// The trucks shown as big buttons on the driver app's first screen (more are added as runs are sent to them).
+export const KNOWN_TRUCKS = [
+  { code: "W99", nickname: "White 99" },
+  { code: "BW", nickname: "Berry White" },
+  { code: "WW", nickname: "White Widow" },
+];
 // "Ford, Transit 250 White 99, X78446" → plate "X78446", truck "W99" ("Berry White" → "BW", "White Widow" → "WW")
 export function vehicleInfo(v) {
   const parts = String(v || "").split(",").map(x => x.trim()).filter(Boolean);
