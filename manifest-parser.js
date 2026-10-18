@@ -109,7 +109,7 @@ const ALL_LABELS = [...Object.values(LBL).map(x => x[0]), DEST_RE,
   /^(?:package|tag|lab|source|est\.?|estimated|departure|arrival|route|driver|vehicle|transporter|origin|originating|shipper|phone|manifest|date|gross|weight|price|wholesale|received|invoice|contains|item\s*details)\b/i];
 const isLabel = t => /:\s*$/.test(t) || ALL_LABELS.some(re => re.test(t) && t.replace(re, "").replace(/^[\s:#.\-]+/, "").length === 0);
 // Lines under a package that are details, not more of the item name.
-const DETAIL_LINE = /^(?:contains\s*retail|item\s*details|source\s*(?:harvest|package|production)|lab\s*test\s*(?:result|date)|product\s*rejection|name\s*of\s*person|signature|i\s*confirm)/i;
+const DETAIL_LINE = /^(?:contains\s*retail|item\s*details|source\s*(?:harvest|package|production)|org\.?\s*src|lab\s*test\s*(?:result|date)|product\s*rejection|name\s*of\s*person|signature|i\s*confirm|manifest\s*no|metrc|marijuana\s*transportation|all\s*sales|reject\s*product|transfer\s*form)/i;
 
 function labelValue(lines, [re, reject]) {
   for (let li = 0; li < lines.length; li++) {
@@ -252,7 +252,12 @@ export function parseLines(lines) {
       const employeeId = idAt >= 0 && l.segs[idAt + 1] ? l.segs[idAt + 1].t.trim().toUpperCase() : "";
       if (name && !out.transporters.some(t => t.name === name)) out.transporters.push({ name, employeeId });
     }
-    if (/^make,?\s*model/i.test(l.segs[k].t) && !out.vehicle) out.vehicle = l.segs[k + 1].t.replace(/,\s*$/, "");
+    if (/^make,?\s*model/i.test(l.segs[k].t) && !out.vehicle) {
+      // the plate is often printed on the next line, under the vehicle
+      const v = l.segs[k + 1], nx = lines[lines.indexOf(l) + 1];
+      const more = nx && nx.page === l.page && nx.segs.length === 1 && Math.abs(nx.segs[0].x0 - v.x0) < 5 ? ", " + nx.segs[0].t : "";
+      out.vehicle = (v.t + more).replace(/,\s*,/g, ",").replace(/,\s*$/, "");
+    }
   }
 
   const seen = new Set();
@@ -476,7 +481,8 @@ export function parseTable(rows) {
 
 /* ======================= tidy up one file ======================= */
 const countPkgs = r => (r.stops || []).reduce((n, s) => n + s.packages.length, 0);
-const cleanItem = t => String(t || "").replace(/^M\d{6,}\s*:\s*/, "").replace(/\s+/g, " ").replace(/\s*[-–]\s*$/, "").trim();
+const cleanItem = t => String(t || "").replace(/\b(?:Shp|Shipped|Rcv|Received)\s*:\s*[\d.,]+\s*[A-Za-z]*/gi, " ")
+  .replace(/^M\d{6,}\s*:\s*/, "").replace(/\s+/g, " ").replace(/\s*[-–]\s*$/, "").trim();
 function finish(r, source, fileName, rawText) {
   const stops = (r.stops || []).filter(s => s.packages.length);
   stops.forEach((s, i) => {
