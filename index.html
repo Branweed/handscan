@@ -35,7 +35,7 @@
 <main id="app"><div class="empty">Loading…</div></main>
 <script type="module">
 import { DEMO, h, swap, normalizeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, RESULT, plural, friendlyError,
-  runTitle, manifestNos, crewNames, firstName, stopSets, setText, multiOrigin, boxLabel, KNOWN_TRUCKS } from "./shared.js";
+  runTitle, manifestNos, crewNames, firstName, stopSets, setText, multiOrigin, boxLabel, KNOWN_TRUCKS, mergeCrew, personKey } from "./shared.js";
 import { createStore } from "./store.js";
 import { scanMany, signal } from "./barcode-scanner.js";
 
@@ -119,22 +119,29 @@ function body() {
 /* ---------------- first screen: tap your truck (no password), office button underneath ---------------- */
 function loginView() {
   const byCode = new Map(KNOWN_TRUCKS.map(t => [t.code, { ...t }]));
-  for (const t of S.trucks) byCode.set(t.code, { ...(byCode.get(t.code) || {}), ...t });
+  for (const t of S.trucks) { const k = byCode.get(t.code) || {}; byCode.set(t.code, { ...k, ...t, crew: mergeCrew([...(k.crew || []), ...(t.crew || [])]) }); }
   const order = c => { const i = KNOWN_TRUCKS.findIndex(t => t.code === c); return i < 0 ? 99 : i; };
   const trucks = [...byCode.values()].sort((a, b) => order(a.code) - order(b.code) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
   const start = code => { const c = String(code || "").trim().toUpperCase(); if (c) setDriver({ truck: c, name: S.pickName.trim() }); };
-  const crewOf = t => (t.crew || []).map(c => firstName(c.name)).filter(Boolean);
-  const allCrew = [...new Set(trucks.flatMap(t => (t.crew || []).map(c => c.name)).filter(Boolean))];
+  const me = personKey(S.pickName);
+  const myTruck = me && (trucks.find(t => (t.crew || []).some(c => personKey(c.name) === me)) || {}).code;
+  // the dropdown: everyone on every truck, grouped by truck
+  const nameSel = h("select", { "data-k": "dname", class: "namesel", onchange: e => { S.pickName = e.target.value; render(); } },
+    h("option", { value: "", selected: !S.pickName }, "Choose your name…"),
+    trucks.filter(t => (t.crew || []).length).map(t => h("optgroup", { label: `${t.code}${t.nickname ? " · " + t.nickname : ""}` },
+      t.crew.map(c => h("option", { value: c.name, selected: personKey(c.name) === me }, c.name)))),
+    S.pickName && !myTruck ? h("option", { value: S.pickName, selected: true }, S.pickName) : null);
   return h("div", { class: "pick" },
+    h("label", { class: "f pick-name" }, "Who are you?", nameSel),
     h("h2", { class: "pick-q" }, "Which truck are you on?"),
     h("div", { class: "trucks" }, trucks.map(t => {
-      const last = t.code === S.lastTruck, crew = crewOf(t);
-      return h("button", { type: "button", class: "truck" + (last ? " last" : ""), onclick: () => start(t.code) },
+      const mine = myTruck ? t.code === myTruck : t.code === S.lastTruck, crew = (t.crew || []).map(c => firstName(c.name));
+      return h("button", { type: "button", class: "truck" + (mine ? " last" : ""), onclick: () => start(t.code) },
         h("span", { class: "tcode" }, t.code),
         h("span", { class: "tinfo" },
           h("span", { class: "tname" }, t.nickname || `Truck ${t.code}`),
           crew.length ? h("span", { class: "tcrew" }, crew.join(" & ")) : null,
-          last ? h("span", { class: "chip ok tlast" }, "Last used") : null),
+          mine ? h("span", { class: "chip ok tlast" }, myTruck ? "Your truck" : "Last used") : null),
         h("span", { class: "tgo", "aria-hidden": "true" }, "›"));
     })),
     S.other
@@ -142,10 +149,6 @@ function loginView() {
           h("input", { "data-k": "truck", value: S.pick, placeholder: "Truck name", autocapitalize: "characters", spellcheck: "false", style: { textTransform: "uppercase" },
             oninput: e => { S.pick = e.target.value; } }), h("button", { class: "primary" }, "Go"))
       : h("button", { type: "button", class: "linkbtn", onclick: () => { S.other = true; render(); } }, "Truck not listed?"),
-    h("label", { class: "f pick-name" }, "Your name (optional)",
-      h("input", { "data-k": "dname", value: S.pickName, placeholder: "e.g. John", list: "crewnames", autocomplete: "off",
-        oninput: e => { S.pickName = e.target.value; } })),
-    h("datalist", { id: "crewnames" }, allCrew.map(n => h("option", { value: n }))),
     h("div", { class: "hint" }, "No password needed. Open the app once with internet each morning so your run downloads — then it works offline."),
     h("div", { class: "pick-sep" }),
     h("a", { class: "btn big office", href: "admin.html#office" }, "🔒  Office / Admin"));

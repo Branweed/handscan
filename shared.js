@@ -128,16 +128,32 @@ export const manifestNos = m => {
   return l.length ? l : m.manifestNo ? [m.manifestNo] : [];
 };
 export const runTitle = m => m.title || [m.truck, fmtDate(m.date)].filter(Boolean).join(" · ") || (m.manifestNo ? `Manifest ${m.manifestNo}` : "Delivery");
-export const crewNames = m => (m.driverNames && m.driverNames.length ? m.driverNames : m.driverName ? [m.driverName] : []).join(" & ");
+export const crewNames = m => mergeCrew((m.driverNames && m.driverNames.length ? m.driverNames : m.driverName ? [m.driverName] : []).map(name => ({ name }))).map(c => c.name).join(" & ");
 export const driverIdsOf = m => (m.driverIds && m.driverIds.length ? m.driverIds : m.driverId ? [m.driverId] : []);
 export const firstName = n => String(n || "").trim().split(/\s+/)[0];
 /* ---------------- trucks + driver logins ---------------- */
 // The trucks shown as big buttons on the driver app's first screen (more are added as runs are sent to them).
 export const KNOWN_TRUCKS = [
-  { code: "W99", nickname: "White 99" },
-  { code: "BW", nickname: "Berry White" },
-  { code: "WW", nickname: "White Widow" },
+  { code: "W99", nickname: "White 99", crew: [{ name: "John Gomes" }, { name: "James M. Stewart" }] },
+  { code: "BW", nickname: "Berry White", crew: [{ name: "Julio Tavares" }, { name: "Jesse M. Cort" }] },
+  { code: "WW", nickname: "White Widow", crew: [{ name: "James Jorge" }, { name: "Giovanni Alberto San Inocencio" }] },
 ];
+// One person = one entry: "James M. Stewart", "James Stewart" and "JAMES STEWART" all match (first + last name, middle initials ignored),
+// and so does the same Employee ID. Keeps the fullest name and any ID seen.
+export const personKey = n => { const w = String(n || "").toLowerCase().replace(/[^a-z\s'-]/g, " ").split(/\s+/).filter(x => x.length > 1); return w.length ? w[0] + " " + w[w.length - 1] : ""; };
+export function mergeCrew(list) {
+  const out = [];
+  for (const c of list || []) {
+    if (!c || !c.name) continue;
+    const id = String(c.employeeId || "").toUpperCase(), key = personKey(c.name);
+    const o = out.find(x => (id && x.employeeId && x.employeeId === id) || (key && personKey(x.name) === key));
+    if (!o) { out.push({ ...c, employeeId: id }); continue; }
+    if (!o.employeeId && id) o.employeeId = id;
+    if (String(c.name).trim().length > String(o.name).trim().length) o.name = String(c.name).trim();
+    if (c.include === false) o.include = o.include ?? false;
+  }
+  return out;
+}
 // "Ford, Transit 250 White 99, X78446" → plate "X78446", truck "W99" ("Berry White" → "BW", "White Widow" → "WW")
 export function vehicleInfo(v) {
   const parts = String(v || "").split(",").map(x => x.trim()).filter(Boolean);

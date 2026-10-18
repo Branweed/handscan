@@ -15,7 +15,7 @@
  *   - Generic "label: value" PDFs, table PDFs, and CSV exports.
  * The office page always shows a preview, so anything it gets wrong can be fixed before sending.
  */
-import { TAG_RE, TAG_RE_G, normalizeTag, looksLikeTag, uid, originInfo, originRank } from "./shared.js";
+import { TAG_RE, TAG_RE_G, normalizeTag, looksLikeTag, uid, originInfo, originRank , mergeCrew } from "./shared.js";
 
 const PDFJS_VER = "4.4.168";
 export const PDFJS_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VER}/build/pdf.min.mjs`;
@@ -253,7 +253,7 @@ export function parseLines(lines) {
       const name = l.segs[k + 1].t.trim();
       const idAt = l.segs.findIndex((s, j) => j > k && /employee\s*id/i.test(s.t));
       const employeeId = idAt >= 0 && l.segs[idAt + 1] ? l.segs[idAt + 1].t.trim().toUpperCase() : "";
-      if (name && !out.transporters.some(t => t.name === name)) out.transporters.push({ name, employeeId });
+      if (name) out.transporters = mergeCrew([...out.transporters, { name, employeeId }]);
     }
     if (/^make,?\s*model/i.test(l.segs[k].t) && !out.vehicle) {
       // the plate is often printed on the next line, under the vehicle
@@ -617,7 +617,7 @@ export function combine(input) {
   return {
     date: dated ? dated.date : "",
     stops: merged, warnings: [...new Set(warnings)],
-    transporters: [...new Map(results.flatMap(r => r.transporters || []).map(t => [t.employeeId || t.name.toLowerCase(), t])).values()],
+    transporters: mergeCrew(results.flatMap(r => r.transporters || [])),
     vehicle: (results.find(r => r.vehicle) || {}).vehicle || "",
     files: results.map(r => r.fileName),
     source: results.length > 1 ? "multiple" : (results[0] && results[0].source) || "manual",

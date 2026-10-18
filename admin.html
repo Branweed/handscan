@@ -75,7 +75,7 @@ table.res th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-s
 <main id="app"><div class="empty">Loading…</div></main>
 <script type="module">
 import { DEMO, h, swap, uid, normalizeTag, looksLikeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, plural, downloadCsv,
-  friendlyError, manifestNos, runTitle, crewNames, firstName, vehicleInfo, adminEmail, stopSets, stopManifestNos, setText, multiOrigin, boxLabel, ORIGINS } from "./shared.js";
+  friendlyError, manifestNos, runTitle, crewNames, firstName, vehicleInfo, adminEmail, stopSets, stopManifestNos, setText, multiOrigin, boxLabel, ORIGINS, mergeCrew } from "./shared.js";
 import { createStore } from "./store.js";
 
 const root = document.getElementById("app"), $ = id => document.getElementById(id);
@@ -180,7 +180,7 @@ async function readFiles(list, add = false) {
     const known = vi.plate && A.trucksDb.find(t => (t.plates || []).includes(vi.plate));
     A.draft = { ...run, _results: results, date: run.date || today(),
       truck: known ? known.code : vi.code, plate: vi.plate, nickname: vi.nickname,
-      crew: run.transporters.map(t => ({ ...t, include: true })) };
+      crew: mergeCrew(run.transporters).map(t => ({ ...t, include: true })) };
     if (prev) {   // keep what was already chosen
       A.draft.date = prev.date || A.draft.date; A.draft.truck = prev.truck || A.draft.truck;
       for (const c of A.draft.crew) { const o = (prev.crew || []).find(x => (x.employeeId || x.name) === (c.employeeId || c.name)); if (o) c.include = o.include; }
@@ -304,12 +304,12 @@ async function saveDraft() {
   const nos = stops.flatMap(stopManifestNos);
   const clash = A.manifests.filter(m => m.status !== "archived" && manifestNos(m).some(n => nos.includes(n)));
   if (clash.length && !confirm(`Manifest ${clash.flatMap(manifestNos).filter(n => nos.includes(n)).join(", ")} was already sent (${clash.map(runTitle).join(", ")}). Send another copy?`)) return;
-  const m = { date: d.date || today(), truck, driverIds: [], driverNames: crew.map(c => c.name), status: "assigned", stops, stopsDone: {},
+  const m = { date: d.date || today(), truck, driverIds: [], driverNames: mergeCrew(crew).map(c => c.name), status: "assigned", stops, stopsDone: {},
     createdAt: Date.now(), updatedAt: Date.now(), source: d.source || "manual", files: d.files || [] };
   m.title = [m.truck, fmtDate(m.date)].filter(Boolean).join(" · ");
   A.busy = "Sending…"; render();
   try {
-    if (d.plate || d.nickname || crew.length) await A.store.saveTruck(truck, { plate: d.plate, nickname: d.nickname, crew: crew.map(c => ({ name: c.name, employeeId: c.employeeId || "" })) });
+    if (d.plate || d.nickname || crew.length) await A.store.saveTruck(truck, { plate: d.plate, nickname: d.nickname, crew: mergeCrew(crew).map(c => ({ name: c.name, employeeId: c.employeeId || "" })) });
     const id = await A.store.saveManifest(m);
     A.draft = null; A.tab = "manifests"; openManifest(id);
   } catch (e) { A.error = friendlyError(e); }
@@ -424,7 +424,7 @@ function driversView() {
           h("div", { class: "ic", style: { width: "44px", borderRadius: "10px", fontSize: "13px" } }, c),
           h("div", { class: "main" },
             h("div", { class: "name" }, [t.nickname, (t.plates || []).length && `plate ${t.plates.join(", ")}`].filter(Boolean).join(" · ") || c),
-            h("div", { class: "meta" }, (t.crew || []).length ? `Crew: ${t.crew.map(x => x.name).join(", ")}` : "No crew seen yet")),
+            h("div", { class: "meta" }, (t.crew || []).length ? `Crew: ${mergeCrew(t.crew).map(x => x.name).join(", ")}` : "No crew seen yet")),
           h("span", { class: "chip" }, plural(runs, "run")));
       }) : h("div", { class: "empty" }, "No trucks yet. They appear after you send the first run.")),
     h("div", { class: "card" },
