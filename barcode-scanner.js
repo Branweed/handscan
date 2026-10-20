@@ -101,6 +101,35 @@ async function zxingReader(formats, url) {
     };
   } catch (e) { console.warn("barcode-scanner: backup reader didn't load", e); return null; }
 }
+// Extra looks at each frame. A small or glare-washed code is easier to read when the reader
+// gets just the middle of the picture at full sharpness, and again with the contrast stretched.
+const prepCanvas = document.createElement("canvas");
+const prepCtx = prepCanvas.getContext("2d", { willReadFrequently: true });
+function prepFrame(video, mode) {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w || !h || mode === "full") return video;
+  const cw = Math.round(w * 0.8), ch = Math.round(Math.min(h * 0.55, cw * 0.8));
+  const sx = Math.round((w - cw) / 2), sy = Math.round((h - ch) / 2);
+  const up = Math.max(1, Math.min(2, 900 / Math.max(cw, ch)));   // small frames get enlarged a bit
+  prepCanvas.width = Math.round(cw * up); prepCanvas.height = Math.round(ch * up);
+  prepCtx.imageSmoothingEnabled = true;
+  prepCtx.drawImage(video, sx, sy, cw, ch, 0, 0, prepCanvas.width, prepCanvas.height);
+  if (mode === "boost") {
+    const img = prepCtx.getImageData(0, 0, prepCanvas.width, prepCanvas.height), d = img.data, n = d.length / 4;
+    const lum = new Uint8Array(n), hist = new Uint32Array(256);
+    for (let i = 0, j = 0; j < n; i += 4, j++) { const v = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8; lum[j] = v; hist[v]++; }
+    // ignore the brightest 4% (glare off the sleeve) and darkest 2%, then stretch what's left to full black-to-white
+    let lo = 0, hi = 255, acc = 0;
+    for (; lo < 255; lo++) { acc += hist[lo]; if (acc > n * 0.02) break; }
+    acc = 0; for (; hi > lo; hi--) { acc += hist[hi]; if (acc > n * 0.04) break; }
+    const span = Math.max(24, hi - lo);
+    for (let i = 0, j = 0; j < n; i += 4, j++) { let v = ((lum[j] - lo) * 255 / span) | 0; v = v < 0 ? 0 : v > 255 ? 255 : v; d[i] = d[i + 1] = d[i + 2] = v; }
+    prepCtx.putImageData(img, 0, 0);
+  }
+  return prepCanvas;
+}
+const MODES = ["crop", "boost", "full"];
+
 async function getReader(formats, url) {
   return (await nativeReader(formats)) || (await zxingReader(formats, url));
 }
@@ -128,6 +157,8 @@ const CSS = `
 .bcs-line{position:absolute;left:8%;right:8%;top:50%;height:2px;background:rgba(74,222,128,.9);animation:bcs-sweep 1.6s ease-in-out infinite alternate}
 @keyframes bcs-sweep{from{transform:translateY(-38px)}to{transform:translateY(38px)}}
 .bcs-msg{padding:10px 16px;text-align:center;min-height:44px}
+.bcs-tip{padding:0 16px 8px;text-align:center;font-size:14px;color:#fde68a}
+.bcs-tip:empty{display:none}
 .bcs-count{display:inline-block;background:#4ade80;color:#052e16;font-weight:800;border-radius:999px;padding:2px 10px;margin-left:6px}
 .bcs-row{display:flex;gap:8px;padding:0 16px 10px}
 .bcs-row input{flex:1;min-width:0;border:0;border-radius:12px;min-height:44px;padding:0 12px;font:inherit;font-size:16px}
@@ -196,14 +227,17 @@ export function scanBarcode(opts = {}) {
     const aim = el("div", { class: "bcs-aim" });
     const msg = el("div", { class: "bcs-msg" }, "Starting the camera…");
     const torchBtn = el("button", { class: "bcs-btn", type: "button", hidden: true, onclick: toggleTorch }, "🔦");
+    const zoomBtn = el("button", { class: "bcs-btn", type: "button", hidden: true, onclick: cycleZoom }, "1×");
+    let zoomCaps = null, zoomLevels = [], zoomAt = 0, mode = 0, lastSeen = Date.now(), tipShown = false;
+    const tip = el("div", { class: "bcs-tip" });
     const manual = el("input", { inputmode: o.manualNumeric ? "numeric" : "text", autocapitalize: o.manualNumeric ? null : "characters",
       autocomplete: "off", spellcheck: "false", placeholder: o.manualPlaceholder, "aria-label": "Barcode", enterkeyhint: "done" });
     const fileIn = el("input", { type: "file", accept: "image/*", capture: "environment", hidden: true, onchange: () => fromPhoto(fileIn.files && fileIn.files[0]) });
     const doneBtn = el("button", { class: "bcs-btn primary", type: "button", onclick: () => finish(null) }, o.continuous ? "Done" : "Close");
     const scrim = el("div", { class: "bcs-scrim", role: "dialog", "aria-modal": "true", "aria-label": o.title },
-      el("div", { class: "bcs-top" }, el("b", {}, o.title), torchBtn),
+      el("div", { class: "bcs-top" }, el("b", {}, o.title), zoomBtn, torchBtn),
       el("div", { class: "bcs-view" }, video, aim, el("div", { class: "bcs-line" })),
-      msg,
+      msg, tip,
       o.allowManual ? el("div", { class: "bcs-row" }, manual, el("button", { class: "bcs-btn", type: "button", onclick: typed }, "Use")) : null,
       el("div", { class: "bcs-bottom" },
         o.allowPhoto ? el("button", { class: "bcs-btn", type: "button", onclick: () => fileIn.click() }, "📷 Photo") : null,
@@ -227,6 +261,7 @@ export function scanBarcode(opts = {}) {
       resolve(o.continuous ? found : hit);
     }
     function accept(hit) {
+      lastSeen = Date.now(); tipShown = false; tip.textContent = "";
       if (o.validate && RETAIL.has(hit.format) && !checkDigitOK(hit.code)) return false;
       let r = null;
       if (o.onDetect) try { r = o.onDetect(hit) || null; } catch (e) { console.error(e); }
@@ -266,6 +301,16 @@ export function scanBarcode(opts = {}) {
         if (ok) accept({ ...ok, source: "photo" }); else msg.textContent = "No barcode found in that photo. Get closer, fill the frame and try again.";
       } catch (e) { msg.textContent = "Couldn't read that photo."; }
     }
+    async function setZoom(i) {
+      const track = stream && stream.getVideoTracks()[0];
+      if (!track || !zoomLevels.length) return;
+      zoomAt = (i + zoomLevels.length) % zoomLevels.length;
+      const z = zoomLevels[zoomAt];
+      try { await track.applyConstraints({ advanced: [{ zoom: z }] }); } catch (e) {}
+      zoomBtn.textContent = `${Math.round(z * 10) / 10}×`;
+      try { localStorage.setItem("bcs-zoom", String(z)); } catch (e) {}
+    }
+    function cycleZoom() { setZoom(zoomAt + 1); }
     async function toggleTorch() {
       const track = stream && stream.getVideoTracks()[0];
       if (!track) return;
@@ -276,11 +321,17 @@ export function scanBarcode(opts = {}) {
       if (done) return;
       try {
         if (video.readyState >= 2 && Date.now() > cool) {
-          const hits = (await reader(video)).filter(x => x.code);
+          const view = MODES[mode++ % MODES.length];
+          const hits = (await reader(prepFrame(video, view))).filter(x => x.code);
           const hit = hits[0];
+          if (!hit && !tipShown && Date.now() - lastSeen > 6000) {
+            tipShown = true;
+            tip.textContent = "Not reading? Tilt the phone a little so the light doesn't shine off the plastic, hold it a hand's width away" + (zoomLevels.length ? ", or tap the zoom button." : ".");
+          }
           if (hit) {
-            // 1D barcodes: wait for the same number twice in a row, which rules out most misreads
-            const needed = RETAIL.has(hit.format) || /code_|itf|codabar/.test(hit.format) ? 2 : 1;
+            // Retail and older 1D codes have no strong built-in check: wait for the same number twice in a row.
+            // Code 128 (Metrc tags), QR and 2D codes carry their own check, so one clean read is enough.
+            const needed = RETAIL.has(hit.format) || /code_39|code_93|itf|codabar/.test(hit.format) ? 2 : 1;
             last = last.code === hit.code ? { code: hit.code, n: last.n + 1 } : { code: hit.code, n: 1 };
             if (last.n >= needed && !(o.continuous && found.length && found[found.length - 1].code === hit.code && Date.now() < cool + 1500)) {
               last = { code: "", n: 0 };
@@ -289,7 +340,7 @@ export function scanBarcode(opts = {}) {
           }
         }
       } catch (e) {}
-      timer = setTimeout(loop, 120);
+      timer = setTimeout(loop, 40);
     }
     (async () => {
       reader = await getReader(o.formats, o.zxingUrl);
@@ -297,13 +348,27 @@ export function scanBarcode(opts = {}) {
       if (!reader) { msg.textContent = "This browser can't read barcodes with the camera. Use a photo or type the numbers."; return; }
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { msg.textContent = "The camera isn't available here (it needs https). Use a photo or type the numbers."; return; }
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
       } catch (e) { msg.textContent = "Allow the camera to scan, or use a photo or type the numbers."; return; }
       if (done) { stop(); return; }
       video.srcObject = stream;
       try { await video.play(); } catch (e) {}
-      try { const caps = stream.getVideoTracks()[0].getCapabilities ? stream.getVideoTracks()[0].getCapabilities() : {}; if (caps.torch) torchBtn.hidden = false; } catch (e) {}
+      try {
+        const track = stream.getVideoTracks()[0], caps = track.getCapabilities ? track.getCapabilities() : {};
+        if (caps.torch) torchBtn.hidden = false;
+        if (Array.isArray(caps.focusMode) && caps.focusMode.includes("continuous")) track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
+        // Zoom lets the phone stay far enough back to focus sharply and cuts glare. Starts at 2× when the camera has it.
+        if (caps.zoom && caps.zoom.max >= 1.5) {
+          zoomCaps = caps.zoom;
+          zoomLevels = [1, 2, 3].filter(z => z >= (zoomCaps.min || 1) && z <= zoomCaps.max);
+          let saved = 2; try { saved = parseFloat(localStorage.getItem("bcs-zoom")) || 2; } catch (e) {}
+          zoomBtn.hidden = false;
+          const i = zoomLevels.indexOf(saved);
+          setZoom(i >= 0 ? i : Math.min(1, zoomLevels.length - 1));
+        }
+      } catch (e) {}
       msg.textContent = o.hint || (o.continuous ? "Point at each barcode. It reads by itself." : "Point the camera at the barcode. It reads by itself.");
+      lastSeen = Date.now();
       loop();
     })();
   });

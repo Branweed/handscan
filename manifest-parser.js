@@ -587,20 +587,32 @@ export function combine(input) {
     for (const ip of invPkgs) {
       const p = byTag.get(ip.tag);
       if (!p) { warnings.push(`⚠ ${label(inv)} lists ${ip.tag} (${ip.item || "no name"}) but manifest ${inv.manifestNo} doesn't.`); continue; }
+      // p.check is the WTI result for this package, shown in the review list (not saved with the run)
+      const chk = { level: "ok", notes: [], wtiQty: [ip.qty, ip.uom].filter(Boolean).join(" "), wti: inv.invoiceNo || "" };
       if (ip.box) p.box = ip.box;
-      if (!p.batch && ip.batch) p.batch = ip.batch;
-      else if (ip.batch && p.batch && !sameBatch(p.batch, ip.batch)) warnings.push(`${ip.tag}: batch is ${p.batch} on the manifest but ${ip.batch} on the WTI.`);
       if (!p.item && ip.item) p.item = ip.item;
-      if (ip.qty && p.qty && !qtyMatches(p, ip)) warnings.push(`⚠ ${ip.tag}: quantity is ${p.qty} ${p.uom} on the manifest but ${ip.qty} ${ip.uom} on ${label(inv)}.`);
+      const name = p.item || ip.item || "no name";
+      if (!p.batch && ip.batch) p.batch = ip.batch;
+      else if (ip.batch && p.batch && !sameBatch(p.batch, ip.batch)) {
+        warnings.push(`${ip.tag} (${name}): batch is ${p.batch} on the manifest but ${ip.batch} on the WTI.`);
+        chk.level = "warn"; chk.notes.push(`WTI batch ${ip.batch}`);
+      }
+      if (ip.qty && p.qty && !qtyMatches(p, ip)) {
+        warnings.push(`⚠ ${ip.tag} (${name}): quantity is ${p.qty} ${p.uom} on the manifest but ${ip.qty} ${ip.uom} on ${label(inv)}.`);
+        chk.level = "bad"; chk.notes.push(`WTI says ${chk.wtiQty}`);
+      }
+      p.check = chk;
     }
-    for (const [t, p] of byTag) if (mkey(p.manifestNo) === mkey(inv.manifestNo) && !invTags.has(t))
+    for (const [t, p] of byTag) if (mkey(p.manifestNo) === mkey(inv.manifestNo) && !invTags.has(t)) {
       warnings.push(`⚠ Manifest ${inv.manifestNo}: ${t} (${p.item || "no name"}) isn't on ${label(inv)}.`);
+      p.check = { level: "bad", notes: ["Not on the WTI"] };
+    }
   }
   // the same tag on two manifests (or the same manifest uploaded twice)
   const seen = new Map();
   for (const s of stops) for (const p of s.packages) {
     const where = `${s.name}${p.origin ? ` (${p.origin})` : ""}`;
-    if (seen.has(p.tag)) warnings.push(`⚠ ${p.tag} is on both ${seen.get(p.tag)} and ${where}.`); else seen.set(p.tag, where);
+    if (seen.has(p.tag)) warnings.push(`⚠ ${p.tag} (${p.item || "no name"}) is on both ${seen.get(p.tag)} and ${where}.`); else seen.set(p.tag, where);
   }
   // one stop per customer: a Fall River set and a Lakeville set for the same order become one stop
   const key = s => String(s.license || "").toUpperCase() || String(s.name || "").toLowerCase();

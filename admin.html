@@ -39,7 +39,7 @@
 .drop{display:block;border:2px dashed var(--line);border-radius:14px;padding:26px 16px;text-align:center;cursor:pointer;background:var(--field)}
 .drop.over{border-color:var(--primary);background:var(--soft)}
 .drop b{display:block;font-size:17px;margin-bottom:4px}
-.prow{display:grid;grid-template-columns:minmax(0,.4fr) minmax(0,.55fr) minmax(0,2.3fr) minmax(0,2.6fr) minmax(0,.7fr) minmax(0,.9fr) minmax(0,1.5fr) auto;gap:6px;align-items:center;padding:4px 0}
+.prow{display:grid;grid-template-columns:minmax(0,.4fr) minmax(0,.55fr) minmax(0,2.3fr) minmax(0,2.6fr) minmax(0,.7fr) minmax(0,.9fr) minmax(0,1.5fr) minmax(0,1.3fr) auto;gap:6px;align-items:center;padding:4px 0}
 .prow .from{font-size:13px;font-weight:800;color:var(--muted);text-align:center}
 .sets{display:flex;flex-direction:column;gap:4px;margin:2px 0 10px;font-size:14px}
 .sets .chip{margin-right:6px}
@@ -52,7 +52,10 @@
 .prow button{min-height:38px;width:38px;padding:0}
 .loadline{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--field);border:1px solid var(--line);font-size:14.5px}
 .loadline .meta{margin-top:4px}
-@media (max-width:760px){.prow{grid-template-columns:.4fr .6fr 1fr 1fr}.prow .t,.prow .it{grid-column:1/-1}.prow.head{display:none}.prow{border-top:1px solid var(--line);padding:10px 0}}
+.prow .chk{font-size:12.5px;line-height:1.25}
+.prow .chk .meta{font-size:12px;margin-top:2px}
+.prow.ok-row input{background:var(--ok-bg)}
+@media (max-width:760px){.prow{grid-template-columns:.4fr .6fr 1fr 1fr}.prow .t,.prow .it,.prow .chk{grid-column:1/-1}.prow.head{display:none}.prow{border-top:1px solid var(--line);padding:10px 0}}
 .stopcard>.grid2{margin:10px 0}
 .warnlist{margin:8px 0 0;padding-left:20px;color:var(--warn);font-size:14px}
 .oklist{margin:8px 0 0;color:var(--ok);font-size:14px;font-weight:700}
@@ -212,6 +215,8 @@ function draftView() {
   // Most orders have a Fall River and a Lakeville set; point out stops that came with only one
   const known = Object.values(ORIGINS).map(o => o.name);
   const single = (d.stops || []).filter(s => s.sets && s.sets.length === 1 && known.includes(s.sets[0].origin));
+  const pk = (d.stops || []).flatMap(s => s.packages), withChk = pk.filter(p => p.check);
+  const nOk = withChk.filter(p => p.check.level === "ok").length, nOff = withChk.length - nOk;
   const more = h("input", { type: "file", multiple: true, hidden: true, accept: ".pdf,.csv,.tsv,.txt,application/pdf,text/csv,text/plain", onchange: e => readFiles(e.target.files, true) });
   const sendLabel = truck ? `Send to ${truck}${going.length ? ` (${going.map(c => firstName(c.name)).join(" & ")})` : ""}` : "Type the truck name to send";
   return h("div", null,
@@ -219,6 +224,11 @@ function draftView() {
       h("div", { class: "rb" }, h("h2", { class: "title", style: { margin: 0 } }, "Check the run"),
         h("span", { class: "meta" }, d.files && d.files.length ? plural(d.files.length, "file") : "Typed in")),
       h("div", { class: "meta" }, `${plural(total, "package")} in ${plural(d.stops.length, "stop")}`),
+      withChk.length ? h("div", { class: "rb", style: { marginTop: "8px" } },
+        h("div", null,
+          h("span", { class: "chip ok" }, `✓ ${nOk} of ${withChk.length} match the WTI`),
+          nOff ? h("span", { class: "chip bad", style: { marginLeft: "6px" } }, `${nOff} need a look`) : null),
+        h("button", { class: "small", onclick: () => { A.onlyProblems = !A.onlyProblems; render(); } }, A.onlyProblems ? "Show all packages" : "Show only problems")) : null,
       checked && !crit.length && d.source === "multiple" ? h("div", { class: "oklist" }, `✓ Every WTI matches its manifest, tag for tag (${plural(checked, "set")}).`) : null,
       crit.length ? h("ul", { class: "warnlist", style: { color: "var(--bad)", fontWeight: 700 } }, crit.map(w => h("li", null, w.replace(/^⚠\s*/, "")))) : null,
       other.length ? h("ul", { class: "warnlist" }, other.map(w => h("li", null, w))) : null,
@@ -246,10 +256,13 @@ function draftView() {
       s.sets && s.sets.length ? h("div", { class: "sets" }, s.sets.map(x => h("div", { class: "set" },
         x.originShort ? h("span", { class: "chip" }, x.originShort) : null, setText(x),
         x.invoiceNo ? null : h("span", { class: "chip warn", style: { marginLeft: "6px" } }, "no WTI")))) : null,
-      h("div", { class: "prow head" }, ["From", "Box", "Metrc tag", "Item", "Qty", "Unit", "Batch", ""].map(x => h("div", null, x))),
+      (() => { const c = s.packages.filter(p => p.check), ok = c.filter(p => p.check.level === "ok").length;
+        return c.length ? h("div", { class: "meta", style: { margin: "0 0 6px" } }, h("span", { class: "chip " + (ok === c.length ? "ok" : "warn") }, `${ok} of ${c.length} match the WTI`)) : null; })(),
+      h("div", { class: "prow head" }, ["From", "Box", "Metrc tag", "Item", "Qty", "Unit", "Batch", "WTI check", ""].map(x => h("div", null, x))),
       s.packages.map((p, pi) => {
+        if (A.onlyProblems && (!p.check || p.check.level === "ok") && p.tag) return null;
         const nt = normalizeTag(p.tag), bad = p.tag && (!looksLikeTag(nt) || dupTags.has(nt));
-        return h("div", { class: "prow" },
+        return h("div", { class: "prow" + (p.check && p.check.level === "ok" ? " ok-row" : "") },
           h("div", { class: "from", title: p.origin || "" }, p.originShort || ""),
           h("input", { "data-k": `p-${s.id}-${pi}-x`, value: p.box || "", placeholder: "Box", oninput: set(p, "box") }),
           h("input", { class: "t" + (bad ? " badtag" : ""), "data-k": `p-${s.id}-${pi}-t`, value: p.tag, placeholder: "1A4…", title: bad ? (dupTags.has(nt) ? "This tag is listed twice" : "Doesn't look like a Metrc tag") : "",
@@ -258,6 +271,7 @@ function draftView() {
           h("input", { "data-k": `p-${s.id}-${pi}-q`, value: p.qty, placeholder: "Qty", inputmode: "decimal", oninput: set(p, "qty") }),
           h("input", { "data-k": `p-${s.id}-${pi}-u`, value: p.uom, placeholder: "Each / Grams", oninput: set(p, "uom") }),
           h("input", { "data-k": `p-${s.id}-${pi}-b`, value: p.batch, placeholder: "Batch", oninput: set(p, "batch") }),
+          checkCell(p),
           h("button", { class: "danger", title: "Remove package", onclick: () => { s.packages.splice(pi, 1); render(); } }, "✕"));
       }),
       h("button", { class: "small", style: { marginTop: "8px" }, onclick: () => { s.packages.push(blankPkg()); render(); } }, "+ Add package"))),
@@ -272,6 +286,15 @@ function draftView() {
     h("div", { class: "sticky-actions" },
       h("button", { class: "primary", style: { flex: 1 }, disabled: !total || !truck, onclick: saveDraft }, sendLabel),
       h("button", { onclick: () => { if (confirm("Throw away this run?")) { A.draft = null; render(); } } }, "Discard")));
+}
+// What the WTI said about this package: a green match, or what's off
+function checkCell(p) {
+  const c = p.check;
+  if (!c) return h("div", { class: "chk meta" }, p.tag ? "No WTI" : "");
+  if (c.level === "ok") return h("div", { class: "chk" }, h("span", { class: "chip ok" }, "✓ Match"),
+    h("div", { class: "meta" }, [c.wti ? `WTI ${c.wti}` : "WTI", c.wtiQty].filter(Boolean).join(" · ")));
+  return h("div", { class: "chk" }, h("span", { class: "chip " + c.level }, c.level === "bad" ? "✗ Off" : "Check"),
+    h("div", { class: "meta" }, c.notes.join(" · ")));
 }
 const move = (arr, i, dir) => { const [x] = arr.splice(i, 1); arr.splice(i + dir, 0, x); };
 
