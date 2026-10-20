@@ -68,7 +68,8 @@ async function nativeReader(formats) {
     const use = formats.filter(f => nativeFormats.includes(f));
     if (!use.length) return null;
     const det = new window.BarcodeDetector({ formats: use });
-    return async src => (await det.detect(src)).map(b => ({ code: String(b.rawValue || ""), format: b.format || "" }));
+    return async src => (await det.detect(src)).map(b => ({ code: String(b.rawValue || ""), format: b.format || "",
+      box: b.boundingBox ? { x: b.boundingBox.x, y: b.boundingBox.y, w: b.boundingBox.width, h: b.boundingBox.height } : null }));
   } catch (e) { return null; }
 }
 let zxingMod = null;
@@ -96,7 +97,10 @@ async function zxingReader(formats, url) {
       for (let i = 0, j = 0; i < px.length; i += 4, j++) lum[j] = (px[i] * 77 + px[i + 1] * 150 + px[i + 2] * 29) >> 8;
       try {
         const res = reader.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.RGBLuminanceSource(lum, canvas.width, canvas.height))));
-        return [{ code: res.getText(), format: back[res.getBarcodeFormat()] || "" }];
+        const pts = (res.getResultPoints() || []).map(p => [p.getX() / scale, p.getY() / scale]);
+        const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+        const box = pts.length ? { x: Math.min(...xs) - 20, y: Math.min(...ys) - 20, w: Math.max(...xs) - Math.min(...xs) + 40, h: Math.max(...ys) - Math.min(...ys) + 40 } : null;
+        return [{ code: res.getText(), format: back[res.getBarcodeFormat()] || "", box }];
       } catch (e) { return []; }   // nothing found in this frame
     };
   } catch (e) { console.warn("barcode-scanner: backup reader didn't load", e); return null; }
@@ -114,40 +118,53 @@ function prepFrame(video, mode) {
   prepCanvas.width = Math.round(cw * up); prepCanvas.height = Math.round(ch * up);
   prepCtx.imageSmoothingEnabled = true;
   prepCtx.drawImage(video, sx, sy, cw, ch, 0, 0, prepCanvas.width, prepCanvas.height);
-  if (mode === "boost") {
-    const img = prepCtx.getImageData(0, 0, prepCanvas.width, prepCanvas.height), d = img.data, n = d.length / 4;
-    const lum = new Uint8Array(n), hist = new Uint32Array(256);
-    for (let i = 0, j = 0; j < n; i += 4, j++) { const v = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8; lum[j] = v; hist[v]++; }
-    // ignore the brightest 4% (glare off the sleeve) and darkest 2%, then stretch what's left to full black-to-white
-    let lo = 0, hi = 255, acc = 0;
-    for (; lo < 255; lo++) { acc += hist[lo]; if (acc > n * 0.02) break; }
-    acc = 0; for (; hi > lo; hi--) { acc += hist[hi]; if (acc > n * 0.04) break; }
-    const span = Math.max(24, hi - lo);
-    for (let i = 0, j = 0; j < n; i += 4, j++) { let v = ((lum[j] - lo) * 255 / span) | 0; v = v < 0 ? 0 : v > 255 ? 255 : v; d[i] = d[i + 1] = d[i + 2] = v; }
-    prepCtx.putImageData(img, 0, 0);
-  }
+  if (mode === "boost") stretch(prepCtx, prepCanvas.width, prepCanvas.height);
   return prepCanvas;
 }
 const MODES = ["crop", "boost", "full"];
 
 // Reads every code in a photo: the whole picture, then overlapping tiles (2×2 and 3×3) so small
-// codes far from the camera still get enough detail. The same code seen twice counts once.
+// codes far from the camera still get enough detail, plus a high-contrast look at the whole photo and
+// the 2×2 tiles for codes washed out by glare on plastic. The same code seen twice counts once.
+// Returns the codes with where they are, and the upright photo (for drawing outlines on).
 async function readAll(reader, img) {
-  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height, seen = new Map();
-  const add = list => { for (const x of list) if (x.code && !seen.has(x.code)) seen.set(x.code, x); };
-  add(await reader(img).catch(() => []));
+  const W = img.naturalWidth || img.width, H = img.naturalHeight || img.height;
+  const sc = Math.min(1, 4000 / Math.max(W, H));   // keeps memory sane on huge photos
+  const full = document.createElement("canvas"); full.width = Math.round(W * sc); full.height = Math.round(H * sc);
+  full.getContext("2d").drawImage(img, 0, 0, full.width, full.height);   // drawn upright (phone photos store rotation separately)
+  const w = full.width, h = full.height, seen = new Map();
+  const add = (list, ox, oy, k = 1) => { for (const x of list) if (x.code && !seen.has(x.code))
+    seen.set(x.code, { ...x, box: x.box ? { x: ox + x.box.x / k, y: oy + x.box.y / k, w: x.box.w / k, h: x.box.h / k } : null }); };
+  add(await reader(full).catch(() => []), 0, 0);
   const c = document.createElement("canvas"), ctx = c.getContext("2d", { willReadFrequently: true });
+  const tile = async (x, y, tw, th, boost) => {
+    c.width = tw; c.height = th;
+    ctx.drawImage(full, x, y, tw, th, 0, 0, tw, th);
+    if (boost) stretch(ctx, tw, th);
+    add(await reader(c).catch(() => []), x, y);
+  };
   for (const n of [2, 3]) {
     const tw = Math.ceil(w / n * 1.3), th = Math.ceil(h / n * 1.3);   // 30% overlap so a code on a seam is whole in some tile
-    c.width = tw; c.height = th;
     for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) {
       const x = Math.min(w - tw, Math.max(0, Math.round(k * w / n - (tw - w / n) / 2)));
       const y = Math.min(h - th, Math.max(0, Math.round(r * h / n - (th - h / n) / 2)));
-      ctx.drawImage(img, x, y, tw, th, 0, 0, tw, th);
-      add(await reader(c).catch(() => []));
+      await tile(x, y, tw, th, false);
+      if (n === 2) await tile(x, y, tw, th, true);
     }
   }
-  return [...seen.values()];
+  return { hits: [...seen.values()], photo: full };
+}
+// Contrast stretch that ignores the brightest 4% (glare) and darkest 2%.
+function stretch(ctx, w, h) {
+  const img = ctx.getImageData(0, 0, w, h), d = img.data, n = d.length / 4;
+  const lum = new Uint8Array(n), hist = new Uint32Array(256);
+  for (let i = 0, j = 0; j < n; i += 4, j++) { const v = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8; lum[j] = v; hist[v]++; }
+  let lo = 0, hi = 255, acc = 0;
+  for (; lo < 255; lo++) { acc += hist[lo]; if (acc > n * 0.02) break; }
+  acc = 0; for (; hi > lo; hi--) { acc += hist[hi]; if (acc > n * 0.04) break; }
+  const span = Math.max(24, hi - lo);
+  for (let i = 0, j = 0; j < n; i += 4, j++) { let v = ((lum[j] - lo) * 255 / span) | 0; v = v < 0 ? 0 : v > 255 ? 255 : v; d[i] = d[i + 1] = d[i + 2] = v; }
+  ctx.putImageData(img, 0, 0);
 }
 
 async function getReader(formats, url) {
@@ -178,6 +195,7 @@ const CSS = `
 @keyframes bcs-sweep{from{transform:translateY(-38px)}to{transform:translateY(38px)}}
 .bcs-msg{padding:10px 16px;text-align:center;min-height:44px}
 .bcs-multi{max-height:42vh;overflow:auto;text-align:left}
+.bcs-shot{display:block;width:100%;height:auto;border-radius:10px;margin:8px 0 2px;background:#000}
 .bcs-multi>b{display:block;font-size:17px}
 .bcs-multi .bcs-res b{font-size:15px}
 .bcs-tip{padding:0 16px 8px;text-align:center;font-size:14px;color:#fde68a}
@@ -318,15 +336,16 @@ export function scanBarcode(opts = {}) {
         if (!reader) reader = await getReader(o.formats, o.zxingUrl);
         if (!reader) { msg.textContent = "This browser can't read barcodes. Type the numbers instead."; return; }
         const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
-        const hits = (await readAll(reader, img)).filter(x => !(o.validate && RETAIL.has(x.format) && !checkDigitOK(x.code)));
+        const res = await readAll(reader, img);
+        const hits = res.hits.filter(x => !(o.validate && RETAIL.has(x.format) && !checkDigitOK(x.code)));
         URL.revokeObjectURL(img.src);
         if (!hits.length) { msg.textContent = "No barcode found in that photo. Get closer, fill the frame and try again."; return; }
-        if (!o.continuous || hits.length === 1) { accept({ ...hits[0], source: "photo" }); return; }
-        acceptMany(hits.map(x => ({ ...x, source: "photo" })));
+        if (!o.continuous) { accept({ ...hits[0], source: "photo" }); return; }
+        acceptMany(hits.map(x => ({ ...x, source: "photo" })), res.photo);
       } catch (e) { msg.textContent = "Couldn't read that photo."; }
     }
     // Several codes from one photo: check each one, then show one card listing them all.
-    function acceptMany(hits) {
+    function acceptMany(hits, photo) {
       lastSeen = Date.now(); tipShown = false; tip.textContent = "";
       const rank = { ok: 0, warn: 1, bad: 2 }, rows = [];
       let worst = "ok";
@@ -336,12 +355,32 @@ export function scanBarcode(opts = {}) {
         const tone = (r && r.tone) || "ok";
         if (rank[tone] > rank[worst]) worst = tone;
         found.push(hit);
-        rows.push(el("div", { class: `bcs-res ${tone}`, style: "margin-top:6px" }, el("b", {}, (r && r.title) || hit.code),
+        hit.tone = tone;
+        rows.push(el("div", { class: `bcs-res ${tone}`, style: "margin-top:6px" }, el("b", {}, `${rows.length + 1}. ${(r && r.title) || hit.code}`),
           ((r && r.lines) || []).filter(Boolean).slice(0, 1).map(l => el("div", { class: "bcs-l1" }, l))));
       }
       signal(worst, o);
-      msg.replaceChildren(el("div", { class: "bcs-multi" }, el("b", {}, `📷 ${hits.length} tags read from the photo`), rows));
+      msg.replaceChildren(el("div", { class: "bcs-multi" },
+        el("b", {}, `📷 ${hits.length} ${hits.length === 1 ? "tag" : "tags"} read from the photo`),
+        el("div", { class: "bcs-ln" }, "Every tag that was read has a numbered box. A tag with no box wasn't read: scan it on its own."),
+        photo ? markPhoto(photo, hits) : null, rows));
       cool = Date.now() + 1500;
+    }
+    // A small copy of the photo with a colored, numbered box on each tag that was read
+    function markPhoto(photo, hits) {
+      const k = Math.min(1, 900 / Math.max(photo.width, photo.height));
+      const cv = el("canvas", { class: "bcs-shot" }); cv.width = Math.round(photo.width * k); cv.height = Math.round(photo.height * k);
+      const g = cv.getContext("2d");
+      g.drawImage(photo, 0, 0, cv.width, cv.height);
+      const color = { ok: "#22c55e", warn: "#f59e0b", bad: "#ef4444" };
+      hits.forEach((x, i) => {
+        if (!x.box) return;
+        const bx = x.box.x * k, by = x.box.y * k, bw = x.box.w * k, bh = x.box.h * k;
+        g.lineWidth = 5; g.strokeStyle = color[x.tone] || color.ok; g.strokeRect(bx, by, bw, bh);
+        g.fillStyle = g.strokeStyle; g.fillRect(bx, by - 30, 34, 30);
+        g.fillStyle = "#000"; g.font = "bold 22px system-ui,sans-serif"; g.fillText(String(i + 1), bx + 9, by - 7);
+      });
+      return cv;
     }
     async function setZoom(i) {
       const track = stream && stream.getVideoTracks()[0];
