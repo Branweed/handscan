@@ -37,3 +37,17 @@ Repo is public: no passwords, driver names or employee IDs here.
 
 ## Working style
 Batch requests, short replies, low usage, keep it simple for drivers.
+
+## For Claude: when to hand off
+Brandon wants long chats split up to save usage. Every chat on this project should:
+1. Start by reading this file instead of re-reading the whole repo. Open only the files the task needs.
+2. After every push, update this file (version, what changed, what's waiting on Brandon) in the same commit or right after it.
+3. Suggest a fresh chat, in one line at the end of a reply, when any of these happen:
+   - about 8–10 back-and-forth requests in this chat, or
+   - 3 or more big files read in full (admin.html, index.html, manifest-parser.js, store.js), or
+   - a long-conversation reminder shows up, or
+   - a batch of work is pushed and the next step is Brandon testing at work, or
+   - the topic moves to a different project.
+   The line: "Good point to start a new chat: say 'continue handscan' there. HANDOFF.md is up to date."
+4. When Brandon says "wrap up": update this file (including this section if the rules changed), push, and confirm in one line.
+5. Keep this file short. Replace old status, don't append history. Git log has the history.
