@@ -130,6 +130,26 @@ function prepFrame(video, mode) {
 }
 const MODES = ["crop", "boost", "full"];
 
+// Reads every code in a photo: the whole picture, then overlapping tiles (2×2 and 3×3) so small
+// codes far from the camera still get enough detail. The same code seen twice counts once.
+async function readAll(reader, img) {
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height, seen = new Map();
+  const add = list => { for (const x of list) if (x.code && !seen.has(x.code)) seen.set(x.code, x); };
+  add(await reader(img).catch(() => []));
+  const c = document.createElement("canvas"), ctx = c.getContext("2d", { willReadFrequently: true });
+  for (const n of [2, 3]) {
+    const tw = Math.ceil(w / n * 1.3), th = Math.ceil(h / n * 1.3);   // 30% overlap so a code on a seam is whole in some tile
+    c.width = tw; c.height = th;
+    for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) {
+      const x = Math.min(w - tw, Math.max(0, Math.round(k * w / n - (tw - w / n) / 2)));
+      const y = Math.min(h - th, Math.max(0, Math.round(r * h / n - (th - h / n) / 2)));
+      ctx.drawImage(img, x, y, tw, th, 0, 0, tw, th);
+      add(await reader(c).catch(() => []));
+    }
+  }
+  return [...seen.values()];
+}
+
 async function getReader(formats, url) {
   return (await nativeReader(formats)) || (await zxingReader(formats, url));
 }
@@ -157,6 +177,9 @@ const CSS = `
 .bcs-line{position:absolute;left:8%;right:8%;top:50%;height:2px;background:rgba(74,222,128,.9);animation:bcs-sweep 1.6s ease-in-out infinite alternate}
 @keyframes bcs-sweep{from{transform:translateY(-38px)}to{transform:translateY(38px)}}
 .bcs-msg{padding:10px 16px;text-align:center;min-height:44px}
+.bcs-multi{max-height:42vh;overflow:auto;text-align:left}
+.bcs-multi>b{display:block;font-size:17px}
+.bcs-multi .bcs-res b{font-size:15px}
 .bcs-tip{padding:0 16px 8px;text-align:center;font-size:14px;color:#fde68a}
 .bcs-tip:empty{display:none}
 .bcs-count{display:inline-block;background:#4ade80;color:#052e16;font-weight:800;border-radius:999px;padding:2px 10px;margin-left:6px}
@@ -295,11 +318,30 @@ export function scanBarcode(opts = {}) {
         if (!reader) reader = await getReader(o.formats, o.zxingUrl);
         if (!reader) { msg.textContent = "This browser can't read barcodes. Type the numbers instead."; return; }
         const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
-        const hits = (await reader(img)).filter(x => x.code);
+        const hits = (await readAll(reader, img)).filter(x => !(o.validate && RETAIL.has(x.format) && !checkDigitOK(x.code)));
         URL.revokeObjectURL(img.src);
-        const ok = hits.find(x => !(o.validate && RETAIL.has(x.format) && !checkDigitOK(x.code)));
-        if (ok) accept({ ...ok, source: "photo" }); else msg.textContent = "No barcode found in that photo. Get closer, fill the frame and try again.";
+        if (!hits.length) { msg.textContent = "No barcode found in that photo. Get closer, fill the frame and try again."; return; }
+        if (!o.continuous || hits.length === 1) { accept({ ...hits[0], source: "photo" }); return; }
+        acceptMany(hits.map(x => ({ ...x, source: "photo" })));
       } catch (e) { msg.textContent = "Couldn't read that photo."; }
+    }
+    // Several codes from one photo: check each one, then show one card listing them all.
+    function acceptMany(hits) {
+      lastSeen = Date.now(); tipShown = false; tip.textContent = "";
+      const rank = { ok: 0, warn: 1, bad: 2 }, rows = [];
+      let worst = "ok";
+      for (const hit of hits) {
+        let r = null;
+        if (o.onDetect) try { r = o.onDetect(hit) || null; } catch (e) { console.error(e); }
+        const tone = (r && r.tone) || "ok";
+        if (rank[tone] > rank[worst]) worst = tone;
+        found.push(hit);
+        rows.push(el("div", { class: `bcs-res ${tone}`, style: "margin-top:6px" }, el("b", {}, (r && r.title) || hit.code),
+          ((r && r.lines) || []).filter(Boolean).slice(0, 1).map(l => el("div", { class: "bcs-l1" }, l))));
+      }
+      signal(worst, o);
+      msg.replaceChildren(el("div", { class: "bcs-multi" }, el("b", {}, `📷 ${hits.length} tags read from the photo`), rows));
+      cool = Date.now() + 1500;
     }
     async function setZoom(i) {
       const track = stream && stream.getVideoTracks()[0];
