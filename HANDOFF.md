@@ -7,7 +7,7 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Driver app: https://branweed.github.io/handscan/
 - Office: https://branweed.github.io/handscan/admin.html (on a phone it opens only from the Office / Admin button)
 - Code: github.com/Branweed/handscan, GitHub Pages from `main`. A new session may need `add_repo` (push access) first.
-- Firebase project `handscan-72136` (free Spark): Email/Password + Anonymous sign-in, Firestore. Rules come from `firestore.rules` and must be pasted into the console and published.
+- Firebase project `handscan-72136` (free Spark): Email/Password + Anonymous sign-in, Firestore. Rules come from `firestore.rules` and must be pasted into the console and published (console matches repo as of Oct 21 — the old PIN rules were still live and blocked non-admins).
 - How-to doc (OUT OF DATE, still describes PINs): https://claude.ai/code/artifact/475dd7ec-e6aa-433c-b4e6-467191b693a6
 
 ## How it works
