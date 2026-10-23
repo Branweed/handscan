@@ -7,7 +7,7 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Driver app: https://branweed.github.io/handscan/
 - Office: https://branweed.github.io/handscan/admin.html (on a phone it opens only from the Office / Admin button)
 - Code: github.com/Branweed/handscan, GitHub Pages from `main`. A new session may need `add_repo` (push access) first.
-- Firebase project `handscan-72136` (free Spark): Email/Password + Anonymous sign-in, Firestore. Rules come from `firestore.rules` and must be pasted into the console and published (Oct 22: PIN/device rules removed from the repo — paste and publish again; the Oct 21 rules still work until then).
+- Firebase project `handscan-72136` (free Spark): Email/Password + Anonymous sign-in, Firestore. Rules come from `firestore.rules` and must be pasted into the console and published (console matches repo as of Oct 22 — PIN/device rules removed; Claude can publish them via Chrome by setting the CodeMirror editor).
 - How-to doc (OUT OF DATE, still describes PINs): https://claude.ai/code/artifact/475dd7ec-e6aa-433c-b4e6-467191b693a6
 
 ## How it works
@@ -28,7 +28,6 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Claude can't type passwords or create accounts.
 
 ## Waiting on Brandon
-- Paste the new `firestore.rules` into the Firebase console and Publish (PIN/device rules removed).
 - Confirm a non-admin account/phone loads trucks (hard refresh if it still shows "can't load trucks").
 - Upload a manifest with a new driver and check the name shows in the drivers' list.
 - Test at work: scanning through sleeves, zoom/speed, multi-tag photos, new WTI review column.
