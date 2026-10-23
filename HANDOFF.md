@@ -8,7 +8,7 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Office: https://branweed.github.io/handscan/admin.html (on a phone it opens only from the Office / Admin button)
 - Code: github.com/Branweed/handscan, GitHub Pages from `main`. A new session may need `add_repo` (push access) first.
 - Firebase project `handscan-72136` (free Spark): Email/Password + Anonymous sign-in, Firestore. Rules come from `firestore.rules` and must be pasted into the console and published (console matches repo as of Oct 22 — PIN/device rules removed; Claude can publish them via Chrome by setting the CodeMirror editor).
-- How-to doc (OUT OF DATE, still describes PINs): https://claude.ai/code/artifact/475dd7ec-e6aa-433c-b4e6-467191b693a6
+- How-to doc (current as of Oct 22: no PINs, load check, WTI review, scanning tips, Trucks & phones): https://claude.ai/code/artifact/475dd7ec-e6aa-433c-b4e6-467191b693a6 — edit it with the Claude Docs connector, not a publish
 
 ## How it works
 - Drivers: pick name from dropdown, tap a truck. No PINs. Phones sign in invisibly (Anonymous). Anyone with the link can see runs (accepted).
@@ -33,7 +33,6 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Test at work: scanning through sleeves, zoom/speed, multi-tag photos, new WTI review column.
 
 ## Leftovers / later
-- Update the how-to doc (names + truck, no PINs, auto-added names, Add back, admin features, new scanner/photo/review features).
 - Verify a real Lakeville set. Add RJ as an admin if not done. Check two drivers' employee IDs read from manifests.
 
 ## Working style
