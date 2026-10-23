@@ -43,12 +43,15 @@ Batch requests, short replies, low usage, keep it simple for drivers.
 Brandon wants long chats split up to save usage. Every chat on this project should:
 1. Start by reading this file instead of re-reading the whole repo. Open only the files the task needs.
 2. After every push, update this file (version, what changed, what's waiting on Brandon) in the same commit or right after it.
-3. Suggest a fresh chat, in one line at the end of a reply, when any of these happen:
-   - about 8–10 back-and-forth requests in this chat, or
-   - 3 or more big files read in full (admin.html, index.html, manifest-parser.js, store.js), or
-   - a long-conversation reminder shows up, or
-   - a batch of work is pushed and the next step is Brandon testing at work, or
-   - the topic moves to a different project.
-   The line: "Good point to start a new chat: say 'continue handscan' there. HANDOFF.md is up to date."
-4. When Brandon says "wrap up": update this file (including this section if the rules changed), push, and confirm in one line.
-5. Keep this file short. Replace old status, don't append history. Git log has the history.
+3. Keep a rough running count of tokens used in this chat (Claude doesn't get an exact number, so estimate):
+   - about 4 characters = 1 token; a tool result or reply you can see counts at its length.
+   - full file reads cost roughly: admin.html 13k, manifest-parser.js 10k, index.html 8k, barcode-scanner.js 7k, store.js 4k, shared.js 3k, this file 1k.
+   - a screenshot is about 1–1.5k; each back-and-forth (request, edits, reply) is usually 3–8k on top of file reads.
+   - if a counter like "N tokens left" is shown, use how much it has dropped since the chat started.
+4. Hand off by token use:
+   - Around 60k used: finish the current request, push, update this file, then end the reply with the hand-off line.
+   - Around 90k used: stop starting new work. Push what's done, update this file (note anything half-done), and give the hand-off line.
+   - Also hand off early when a batch of work is pushed and the next step is Brandon testing at work, a long-conversation reminder shows up, or the topic moves to another project.
+   The hand-off line, one line at the end of the reply: "Good point to start a new chat (about Nk tokens used here): say 'continue handscan' there. HANDOFF.md is up to date."
+5. When Brandon says "wrap up": update this file (including this section if the rules changed), push, and confirm in one line.
+6. Keep this file short. Replace old status, don't append history. Git log has the history.
