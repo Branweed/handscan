@@ -51,7 +51,11 @@ Brandon wants long chats split up to save usage. Every chat on this project shou
 4. Hand off by token use:
    - Around 60k used: finish the current request, push, update this file, then end the reply with the hand-off line.
    - Around 90k used: stop starting new work. Push what's done, update this file (note anything half-done), and give the hand-off line.
+5. Hand off by number of requests too (whichever comes first, tokens or requests):
+   - Count Brandon's messages that ask for something (questions or work; "ok"/"thanks" don't count).
+   - At 8 requests: after finishing that one, update this file and push, and say a hand-off is coming soon.
+   - At 10 requests: hand off. Push, update this file (note anything half-done), and give the hand-off line with the count, e.g. "(10 requests, about 70k tokens)".
    - Also hand off early when a batch of work is pushed and the next step is Brandon testing at work, a long-conversation reminder shows up, or the topic moves to another project.
-   The hand-off line, one line at the end of the reply: "Good point to start a new chat (about Nk tokens used here): say 'continue handscan' there. HANDOFF.md is up to date."
-5. When Brandon says "wrap up": update this file (including this section if the rules changed), push, and confirm in one line.
-6. Keep this file short. Replace old status, don't append history. Git log has the history.
+   The hand-off line, one line at the end of the reply: "Good point to start a new chat (N requests, about Nk tokens used here): paste 'continue handscan, read HANDOFF.md (repo: Branweed/handscan)' there. HANDOFF.md is up to date."
+6. When Brandon says "wrap up": update this file (including this section if the rules changed), push, and confirm in one line.
+7. Keep this file short. Replace old status, don't append history. Git log has the history.
