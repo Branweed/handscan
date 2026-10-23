@@ -28,6 +28,7 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Claude can't type passwords or create accounts.
 
 ## Waiting on Brandon
+- Confirm a non-admin account/phone now loads trucks after the Oct 21 rules publish (hard refresh if it still shows "can't load trucks").
 - Test at work: scanning through sleeves, zoom/speed, multi-tag photos, new WTI review column.
 
 ## Leftovers / later
