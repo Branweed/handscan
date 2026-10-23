@@ -19,18 +19,22 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Office → Trucks & phones: Drivers (add/remove/add back; new names on an uploaded manifest are added as soon as the files are read, and the review page says who), Trucks (add/edit/remove, removed copies in `trucks/_removed`), Office admins (add/remove/change password).
 
 ## Scanner (barcode-scanner.js)
-- Live camera: 1080p, continuous focus, zoom button (1×/2×/3×, starts 2×, remembered), each frame read 3 ways in turn (center crop, high-contrast crop for sleeve glare, full frame), ~40 ms loop. Code 128/QR accept one read; retail/Code 39 need two. Tip appears after 6 s with no read.
-- 📷 Photo: reads every tag in one picture (full photo + 2×2 and 3×3 overlapping tiles + contrast pass on 2×2). Each tag is checked; one card lists them, with the photo showing a numbered green/yellow/red box on each read tag. Realistic: 4–6 tags per photo, up to 8–10 in good conditions.
+- Live camera: 1080p, continuous focus, tap the picture to focus there (3 s, then auto). Zoom button 1×–5× (whatever the phone allows), starts 2×, remembered.
+- Each frame read one of 4 ways: center crop, "tight" (middle of the aim box enlarged ~2.4× for far tags), high-contrast crop (sleeve glare), full frame. The view that last read a tag gets every other frame and is remembered (`bcs-favor`); first-time default is high-contrast.
+- Glare: if nothing reads for ~1.1 s, exposure switches between normal and -1 EV; whichever reads is kept and remembered (`bcs-expo`).
+- Timing (v31): 15 ms between frames, 0.45 s pause after a read, a tag just read is ignored for 2.5 s so the next tag reads straight away. Code 128/QR accept one read; retail/Code 39 need two. Tip after 6 s with no read.
+- 📷 Photo: reads every tag in one picture (full photo + 2×2 and 3×3 overlapping tiles + contrast pass on 2×2), numbered green/yellow/red boxes. 4–6 tags per photo, up to 8–10 in good conditions.
+- Not testable here (no browser download); syntax-checked only. Goal from Brandon: a tag through plastic reads in 1–2 s (was 3–4 s).
 
 ## Publishing
-- Edit, bump `VERSION` in `sw.js` (now `manifest-check-v30`), push. Rule changes also go in the Firebase console.
+- Edit, bump `VERSION` in `sw.js` (now `manifest-check-v31`), push. Rule changes also go in the Firebase console.
 - Demo mode: apiKey starting with "PASTE" in `shared.js`.
 - Claude can't type passwords or create accounts.
 
 ## Waiting on Brandon
 - Confirm a non-admin account/phone loads trucks (hard refresh if it still shows "can't load trucks").
 - Upload a manifest with a new driver and check the name shows in the drivers' list.
-- Test at work: scanning through sleeves, zoom/speed, multi-tag photos, new WTI review column.
+- Test v31 at work: time a tag through plastic (goal 1–2 s), far tags with 3–5× zoom, tap to focus, multi-tag photos, WTI review column. If the picture looks too dark, say so (glare exposure).
 
 ## Leftovers / later
 - Verify a real Lakeville set. Add RJ as an admin if not done. Check two drivers' employee IDs read from manifests.

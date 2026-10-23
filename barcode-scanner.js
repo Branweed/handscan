@@ -112,16 +112,25 @@ const prepCtx = prepCanvas.getContext("2d", { willReadFrequently: true });
 function prepFrame(video, mode) {
   const w = video.videoWidth, h = video.videoHeight;
   if (!w || !h || mode === "full") return video;
-  const cw = Math.round(w * 0.8), ch = Math.round(Math.min(h * 0.55, cw * 0.8));
+  // "tight" = just the middle of the aim box, enlarged up to 2.5×: tags far from the camera have bars too thin
+  // to read at normal size, and enlarging them smoothly is often enough.
+  const f = mode === "tight" ? 0.5 : 0.8;
+  const cw = Math.round(w * f), ch = Math.round(Math.min(h * (mode === "tight" ? 0.3 : 0.55), cw * 0.8));
   const sx = Math.round((w - cw) / 2), sy = Math.round((h - ch) / 2);
-  const up = Math.max(1, Math.min(2, 900 / Math.max(cw, ch)));   // small frames get enlarged a bit
+  const up = mode === "tight" ? Math.max(1.5, Math.min(2.5, 1300 / Math.max(cw, ch))) : Math.max(1, Math.min(2, 900 / Math.max(cw, ch)));
   prepCanvas.width = Math.round(cw * up); prepCanvas.height = Math.round(ch * up);
   prepCtx.imageSmoothingEnabled = true;
   prepCtx.drawImage(video, sx, sy, cw, ch, 0, 0, prepCanvas.width, prepCanvas.height);
   if (mode === "boost") stretch(prepCtx, prepCanvas.width, prepCanvas.height);
   return prepCanvas;
 }
-const MODES = ["crop", "boost", "full"];
+const MODES = ["crop", "tight", "boost", "full"];
+const LOOP_MS = 15;        // pause between frames (the reader itself is the slow part)
+const COOL_MS = 450;       // pause after a read so the result can be seen
+const REPEAT_MS = 2500;    // the same tag seen again within this time is ignored (no "Already scanned" spam)
+const GLARE_MS = 1100;     // no read for this long → try the other exposure (darker cuts plastic shine)
+const loadNum = (k, d) => { try { const v = parseFloat(localStorage.getItem(k)); return Number.isFinite(v) ? v : d; } catch (e) { return d; } };
+const saveNum = (k, v) => { try { localStorage.setItem(k, String(v)); } catch (e) {} };
 
 // Reads every code in a photo: the whole picture, then overlapping tiles (2×2 and 3×3) so small
 // codes far from the camera still get enough detail, plus a high-contrast look at the whole photo and
@@ -261,8 +270,8 @@ export function scanBarcode(opts = {}) {
     manualPlaceholder: "Or type the numbers under the barcode", ...opts };
   injectCss();
   return new Promise(resolve => {
-    let stream = null, timer = 0, done = false, reader = null, last = { code: "", n: 0 }, cool = 0;
-    const found = [];
+    let stream = null, timer = 0, done = false, reader = null, last = { code: "", n: 0 }, cool = 0, favor = loadNum("bcs-favor", MODES.indexOf("boost")), tick = 0, focusTimer = 0, expoSwitch = 0, expoOK = loadNum("bcs-expo", 0);
+    const found = [], recent = new Map();   // code → when it was last accepted
     const video = el("video", { playsinline: true, muted: true, autoplay: true });
     video.muted = true;
     const aim = el("div", { class: "bcs-aim" });
@@ -277,7 +286,7 @@ export function scanBarcode(opts = {}) {
     const doneBtn = el("button", { class: "bcs-btn primary", type: "button", onclick: () => finish(null) }, o.continuous ? "Done" : "Close");
     const scrim = el("div", { class: "bcs-scrim", role: "dialog", "aria-modal": "true", "aria-label": o.title },
       el("div", { class: "bcs-top" }, el("b", {}, o.title), zoomBtn, torchBtn),
-      el("div", { class: "bcs-view" }, video, aim, el("div", { class: "bcs-line" })),
+      el("div", { class: "bcs-view", onclick: tapFocus }, video, aim, el("div", { class: "bcs-line" })),
       msg, tip,
       o.allowManual ? el("div", { class: "bcs-row" }, manual, el("button", { class: "bcs-btn", type: "button", onclick: typed }, "Use")) : null,
       el("div", { class: "bcs-bottom" },
@@ -290,7 +299,7 @@ export function scanBarcode(opts = {}) {
     document.body.append(scrim);
 
     function stop() {
-      clearTimeout(timer);
+      clearTimeout(timer); clearTimeout(focusTimer);
       if (stream) stream.getTracks().forEach(t => t.stop());
       stream = null;
     }
@@ -311,13 +320,13 @@ export function scanBarcode(opts = {}) {
       aim.classList.remove("hit", "warn", "bad"); aim.classList.add(tone === "ok" ? "hit" : tone);
       setTimeout(() => aim.classList.remove("hit", "warn", "bad"), tone === "ok" ? 400 : 900);
       if (!o.continuous) { finish(hit); return true; }
-      found.push(hit);
+      found.push(hit); recent.set(hit.code, Date.now());
       if (r && (r.title || r.lines)) {
         const lines = (r.lines || []).filter(Boolean);
         msg.replaceChildren(el("div", { class: `bcs-res ${tone}` }, el("b", {}, r.title || ""),
           lines.map((l, i) => el("div", { class: i === 0 ? "bcs-l1" : "bcs-ln" }, l))));
       } else msg.replaceChildren(document.createTextNode(`Got ${hit.code}`), el("span", { class: "bcs-count" }, String(found.length)));
-      cool = Date.now() + 1200;
+      cool = Date.now() + COOL_MS;
       return true;
     }
     function typed() {
@@ -354,7 +363,7 @@ export function scanBarcode(opts = {}) {
         if (o.onDetect) try { r = o.onDetect(hit) || null; } catch (e) { console.error(e); }
         const tone = (r && r.tone) || "ok";
         if (rank[tone] > rank[worst]) worst = tone;
-        found.push(hit);
+        found.push(hit); recent.set(hit.code, Date.now());
         hit.tone = tone;
         rows.push(el("div", { class: `bcs-res ${tone}`, style: "margin-top:6px" }, el("b", {}, `${rows.length + 1}. ${(r && r.title) || hit.code}`),
           ((r && r.lines) || []).filter(Boolean).slice(0, 1).map(l => el("div", { class: "bcs-l1" }, l))));
@@ -392,6 +401,50 @@ export function scanBarcode(opts = {}) {
       try { localStorage.setItem("bcs-zoom", String(z)); } catch (e) {}
     }
     function cycleZoom() { setZoom(zoomAt + 1); }
+    // Glare from plastic sleeves washes the bars out. Darkening the picture about one stop brings them back.
+    // While nothing reads, it switches between normal and darker every GLARE_MS; whatever reads a tag is kept.
+    let expoCaps = null, expoNow = 0;
+    async function setExposure(v) {
+      const track = stream && stream.getVideoTracks()[0];
+      if (!track || !expoCaps) return;
+      expoNow = Math.max(expoCaps.min, Math.min(expoCaps.max, v));
+      try { await track.applyConstraints({ advanced: [{ exposureCompensation: expoNow }] }); } catch (e) {}
+    }
+    function glareStep() {
+      if (!expoCaps || Date.now() < expoSwitch) return;
+      const now = Date.now();
+      if (now - lastSeen < GLARE_MS) return;
+      // Stay longer on the exposure that last read a tag, only short tries on the other one.
+      const target = expoNow === expoOK ? (expoOK === 0 ? Math.max(expoCaps.min, -1) : 0) : expoOK;
+      expoSwitch = now + (target === expoOK ? GLARE_MS * 1.6 : GLARE_MS * 0.8);
+      setExposure(target);
+    }
+    // Tap the picture to focus there (helps when a far tag stays blurry). Goes back to auto focus after 3 s.
+    async function tapFocus(e) {
+      const track = stream && stream.getVideoTracks()[0];
+      if (!track || !track.getCapabilities) return;
+      const caps = track.getCapabilities(), r = e.currentTarget.getBoundingClientRect();
+      const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+      const fm = Array.isArray(caps.focusMode) ? caps.focusMode : [];
+      const c = {};
+      if ("pointsOfInterest" in (track.getSettings ? track.getSettings() : {}) || caps.pointsOfInterest !== undefined) c.pointsOfInterest = [{ x, y }];
+      if (fm.includes("single-shot")) c.focusMode = "single-shot";
+      if (!Object.keys(c).length) return;
+      try { await track.applyConstraints({ advanced: [c] }); } catch (err) {}
+      tip.textContent = "Focusing…";
+      clearTimeout(focusTimer);
+      focusTimer = setTimeout(() => {
+        if (tip.textContent === "Focusing…") tip.textContent = "";
+        if (fm.includes("continuous")) track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
+      }, 3000);
+    }
+    // Which way to look at the next frame. Whatever view last found a tag gets every other frame,
+    // so a driver who scans from far away gets the zoomed-in view twice as often.
+    function nextMode() {
+      tick++;
+      if (favor >= 0 && favor < MODES.length && tick % 2 === 0) return favor;
+      return (mode++) % MODES.length;
+    }
     async function toggleTorch() {
       const track = stream && stream.getVideoTracks()[0];
       if (!track) return;
@@ -402,12 +455,17 @@ export function scanBarcode(opts = {}) {
       if (done) return;
       try {
         if (video.readyState >= 2 && Date.now() > cool) {
-          const view = MODES[mode++ % MODES.length];
-          const hits = (await reader(prepFrame(video, view))).filter(x => x.code);
+          const vi = nextMode();
+          const now = Date.now();
+          for (const [c, t] of recent) if (now - t > REPEAT_MS) recent.delete(c);
+          // A tag just accepted is skipped, so the next tag in view is read straight away.
+          const hits = (await reader(prepFrame(video, MODES[vi]))).filter(x => x.code && !recent.has(x.code));
           const hit = hits[0];
+          if (hit) { favor = vi; saveNum("bcs-favor", vi); if (expoCaps) { expoOK = expoNow; saveNum("bcs-expo", expoNow); } }
+          else glareStep();
           if (!hit && !tipShown && Date.now() - lastSeen > 6000) {
             tipShown = true;
-            tip.textContent = "Not reading? Tilt the phone a little so the light doesn't shine off the plastic, hold it a hand's width away" + (zoomLevels.length ? ", or tap the zoom button." : ".");
+            tip.textContent = "Not reading? Tilt the phone a little so the light doesn't shine off the plastic" + (zoomLevels.length ? ", step back and use more zoom" : ", hold it a hand's width away") + ", or tap the picture to focus.";
           }
           if (hit) {
             // Retail and older 1D codes have no strong built-in check: wait for the same number twice in a row.
@@ -421,7 +479,7 @@ export function scanBarcode(opts = {}) {
           }
         }
       } catch (e) {}
-      timer = setTimeout(loop, 40);
+      timer = setTimeout(loop, LOOP_MS);
     }
     (async () => {
       reader = await getReader(o.formats, o.zxingUrl);
@@ -437,11 +495,15 @@ export function scanBarcode(opts = {}) {
       try {
         const track = stream.getVideoTracks()[0], caps = track.getCapabilities ? track.getCapabilities() : {};
         if (caps.torch) torchBtn.hidden = false;
+        if (caps.exposureCompensation && caps.exposureCompensation.min < 0) {
+          expoCaps = caps.exposureCompensation;
+          setExposure(expoOK);   // start with whatever read tags last time
+        }
         if (Array.isArray(caps.focusMode) && caps.focusMode.includes("continuous")) track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
         // Zoom lets the phone stay far enough back to focus sharply and cuts glare. Starts at 2× when the camera has it.
         if (caps.zoom && caps.zoom.max >= 1.5) {
           zoomCaps = caps.zoom;
-          zoomLevels = [1, 2, 3].filter(z => z >= (zoomCaps.min || 1) && z <= zoomCaps.max);
+          zoomLevels = [1, 2, 3, 4, 5].filter(z => z >= (zoomCaps.min || 1) && z <= zoomCaps.max);
           let saved = 2; try { saved = parseFloat(localStorage.getItem("bcs-zoom")) || 2; } catch (e) {}
           zoomBtn.hidden = false;
           const i = zoomLevels.indexOf(saved);

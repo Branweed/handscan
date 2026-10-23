@@ -1,6 +1,6 @@
 // Offline support: keeps the app's files on the phone so it opens with no signal.
 // Bump VERSION whenever you upload changed files, so phones pick up the new version.
-const VERSION = "manifest-check-v30";
+const VERSION = "manifest-check-v31";
 const SHELL = ["./", "index.html", "admin.html", "app.css", "shared.js", "store.js", "barcode-scanner.js", "manifest-parser.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png", "icon-maskable-512.png"];
 const FB = "https://www.gstatic.com/firebasejs/10.12.2/";
 const LIBS = [FB + "firebase-app.js", FB + "firebase-auth.js", FB + "firebase-firestore.js"];
