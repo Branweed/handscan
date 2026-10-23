@@ -42,12 +42,12 @@ The camera needs **https** (or `localhost`).
 7. **Host it.**
    - **GitHub Pages:** create a repo, upload every file in this folder, then go to Settings → Pages and choose Deploy from branch `main`.
    - **Firebase Hosting:** run `firebase init hosting` and then `firebase deploy`.
-8. Open `admin.html` and sign in. Drivers are added automatically from the manifests you upload; you can also add one by hand on **Drivers & trucks**.
+8. Open `admin.html` and sign in. Driver names are added automatically from the manifests you upload; you can also add one by hand on **Trucks & phones → Drivers**.
 
 ### Drivers and trucks: automatic
 When you upload a run, the app reads the manifest's **Name of Person Transporting**, **Employee ID** and **vehicle** lines.
 - **Truck:** "Ford, Transit 250 White 99, X78446" becomes **W99** ("Berry White" becomes BW, "White Widow" becomes WW). You can correct it, and it's remembered by license plate after that.
-- **New drivers:** they get a login made for them: their **Employee ID** plus a **6-digit PIN** the app picks. The PINs are shown after you send, and any time on **Drivers & trucks → Show PIN**.
+- **New drivers:** as soon as the files are read, any name not already on the driver list is added to it (the review screen says who), so it shows up in the drivers' "Who are you?" list. No logins or PINs.
 
 ### Two facilities, one order
 Most orders ship as two sets: a manifest + WTI from **Fall River (MP281319)** and another from **Lakeville (MC282112)**. Upload all of a truck's files together (or use **+ Add more files** on the review screen). Every manifest for the same customer becomes **one stop**, and each box is labeled with where it came from (FR / LV), because each WTI numbers its boxes from 1. The review screen points out any customer that only has one set. To add another facility, add a line to `ORIGINS` in `shared.js`.
@@ -79,7 +79,7 @@ Most orders ship as two sets: a manifest + WTI from **Fall River (MP281319)** an
   - The truck is picked for you from the "Name of Person Transporting" on the manifest, and close spellings count (Gomes = Gomez).
   - You can fix anything in the preview before sending.
 - **Runs:** shows live progress, with a ✓, missing or problem status per package, plus who scanned it and when. From here you can send it to a different truck, archive, delete, or **Export results (CSV)**.
-- **Drivers & trucks:** add drivers, set or change a driver's truck, or turn an account off. A turned-off driver can't see runs. Changing a truck affects new runs; to update an existing run, change **Sent to** on that run.
+- **Trucks & phones:** the driver name list (add, remove, add back), trucks (add, edit, remove, add back) and office admins.
 
 ### If the PDF reader gets something wrong
 It's tuned to the Massachusetts Metrc "Marijuana Transportation Manifest" and to Apex Weight Transfer Invoices. It handles item names that wrap onto several lines, `Shp: 30 ea` quantities, and Source Production Batch. It skips "Source Package" tags. It also handles generic label and table layouts and CSV exports. If yours comes out wrong, click **Copy** under "Text read from the file" and share that text (blank out anything sensitive) so the reader can be adjusted.
@@ -107,20 +107,14 @@ It's tuned to the Massachusetts Metrc "Marijuana Transportation Manifest" and to
 
 ---
 
-## Phone access (company code)
+## Phone access
 
-Runs are only visible to **office admins** and **phones a driver has signed in on**. Someone with just the link sees nothing.
-
-**Driver sign-in:** pick your name + enter your own PIN. The **first time**, a driver uses the **office code** (set in the Office) and then makes their own 4–6 digit PIN; after that the office code no longer works for them. The phone stays signed in until **Switch driver**. Drivers can **Change my PIN**; the office can **Reset PIN** (Office → Trucks & phones → Drivers), after which that driver uses the office code once more and makes a new PIN.
+There are no driver logins or PINs. Each phone signs in invisibly (Firebase **Anonymous**), the driver picks their name and taps their truck. Anyone who opens the app link can see runs; someone not signed in at all sees nothing.
 
 One-time setup:
-1. Firebase console → **Authentication → Sign-in method → Add new provider → Anonymous → Enable.** (Phones sign in invisibly; drivers never see it.)
+1. Firebase console → **Authentication → Sign-in method → Add new provider → Anonymous → Enable.**
 2. Firebase console → **Firestore Database → Rules** → paste all of `firestore.rules` → **Publish**.
-3. Office → **Trucks & phones** → **Phone access** → set a 4–8 digit code. Same tab: check the **Drivers** list (it starts from the crews already seen on manifests) and add anyone missing.
-4. On each phone: open the app → pick your name → enter the office code → make your own PIN. It stays signed in.
-
-- **Lost a phone / someone left?** Office → Trucks & phones → remove that phone, or **Remove all phones** and change the code.
-- If Chrome's site data is cleared, that phone just asks for the code again.
+3. Office → **Trucks & phones** → check the **Drivers** list and add anyone missing (new names on uploaded manifests are added automatically).
 
 ## Load check
 On the run screen, drivers tap **Load check** at the dock and scan every package onto the truck in any order. They see what's left per stop, get a red alert for a tag that isn't on the run, and tap **Done loading**. The office sees "Load check: 42 of 42 loaded · finished 6:40 · John" on the run (and anything not loaded).

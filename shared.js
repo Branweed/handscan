@@ -142,7 +142,7 @@ export const KNOWN_TRUCKS = [
 // One person = one entry: "James M. Stewart", "James Stewart" and "JAMES STEWART" all match (first + last name, middle initials ignored),
 // and so does the same Employee ID. Keeps the fullest name and any ID seen.
 export const personKey = n => { const w = String(n || "").toLowerCase().replace(/[^a-z\s'-]/g, " ").split(/\s+/).filter(x => x.length > 1); return w.length ? w[0] + " " + w[w.length - 1] : ""; };
-// The ID a driver's PIN is filed under: "James M. Stewart" → "james_stewart" (same person however the name is written).
+// A short ID for a person: "James M. Stewart" → "james_stewart" (same person however the name is written).
 export const whoKey = n => personKey(n).replace(/\s+/g, "_");
 export function mergeCrew(list) {
   const out = [];
@@ -171,10 +171,6 @@ export function vehicleInfo(v) {
 // An email address typed in full also works.
 export const ADMIN_DOMAIN = "admins.handscan.app";
 export const adminEmail = u => { const v = String(u || "").trim(); return v.includes("@") ? v : `${v.toLowerCase().replace(/[^a-z0-9._-]/g, "")}@${ADMIN_DOMAIN}`; };
-// (Older builds signed drivers in with an Employee ID; drivers now just pick their truck.)
-export const DRIVER_DOMAIN = "drivers.handscan.app";
-export const driverEmail = id => `${String(id || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "")}@${DRIVER_DOMAIN}`;
-export const makePin = () => { const a = new Uint32Array(1); crypto.getRandomValues(a); return String(100000 + (a[0] % 900000)); };
 /* ---------------- load check: every box scanned onto the truck before it leaves ---------------- */
 // Load-check scans are ordinary scans with stopId "load", so the delivery counts above never see them.
 export const LOAD = "load";

@@ -86,7 +86,7 @@ import { createStore } from "./store.js";
 const root = document.getElementById("app"), $ = id => document.getElementById(id);
 const A = { store: null, user: undefined, profile: undefined, tab: "upload", admins: [], manifests: [], draft: null, busy: "", error: "",
   openId: null, openScans: [], showArchived: false, showRaw: false, newAdmin: null, trucksDb: [], unsub: {},
-  access: undefined, devices: [], pins: [], tk: { code: "", nickname: "", plate: "" }, driverNames: undefined, trucksLoaded: false, seeded: false, accDraft: "", nameDraft: "" };
+  tk: { code: "", nickname: "", plate: "" }, driverNames: undefined, trucksLoaded: false, seeded: false, nameDraft: "", newNames: [] };
 
 (async () => {
   try { A.store = await createStore("admin"); }
@@ -195,6 +195,7 @@ async function readFiles(list, add = false) {
       for (const c of A.draft.crew) { const o = (prev.crew || []).find(x => (x.employeeId || x.name) === (c.employeeId || c.name)); if (o) c.include = o.include; }
     }
     if (!run.stops.length) A.draft.stops = blankDraft().stops;
+    A.draft.newNames = [...((prev && prev.newNames) || []), ...addNewNames(A.draft.crew)];
   } catch (e) {
     console.error(e);
     A.error = /fetch|import|module/i.test(String(e && e.message)) ? "Couldn't load the PDF reader. Check your internet connection." : "Couldn't read that file: " + (e.message || e);
@@ -310,6 +311,7 @@ function crewCard(d) {
       h("input", { type: "checkbox", checked: c.include, style: { width: "22px", minHeight: "22px", marginTop: "3px" }, onchange: e => { c.include = e.target.checked; render(); } }),
       h("div", { class: "main" }, h("div", { class: "name" }, c.name),
         h("div", { class: "meta" }, c.employeeId ? `Employee ID ${c.employeeId}` : "")))),
+    d.newNames && d.newNames.length ? h("div", { class: "hint picked" }, `✓ New driver${d.newNames.length > 1 ? "s" : ""} added to the name list: ${d.newNames.join(", ")}`) : null,
     h("div", { class: "hint" }, "Drivers open the app and pick this truck to see the run. No logins or passwords for drivers."));
 }
 
@@ -338,7 +340,7 @@ async function saveDraft() {
   m.title = [m.truck, fmtDate(m.date)].filter(Boolean).join(" · ");
   A.busy = "Sending…"; render();
   try {
-    if (crew.length && A.driverNames !== "rules") A.store.addDriverNames(mergeCrew(crew).map(c => c.name)).catch(e => console.warn(e));
+    if (crew.length) addNewNames(crew);
     if (d.plate || d.nickname || crew.length) await A.store.saveTruck(truck, { plate: d.plate, nickname: d.nickname, crew: mergeCrew(crew).map(c => ({ name: c.name, employeeId: c.employeeId || "" })) });
     const id = await A.store.saveManifest(m);
     A.draft = null; A.tab = "manifests"; openManifest(id);
@@ -458,38 +460,15 @@ function seedDriverNames() {
   const names = mergeCrew(A.trucksDb.flatMap(t => t.crew || [])).map(c => c.name);
   if (names.length) A.store.setDriverNames(names).catch(e => console.warn(e));
 }
-const rulesNote = () => h("div", { class: "banner bad" }, "Publish the new Firestore rules first (Firebase console → Firestore Database → Rules → paste firestore.rules → Publish), then reload this page.");
-function accessCard() {
-  const a = A.access, has = a && a !== "rules" && a.code;
-  const save = async e => {
-    e.preventDefault();
-    const code = A.accDraft.trim();
-    if (!/^\d{4,8}$/.test(code)) { alert("Use 4 to 8 digits."); return; }
-    if (has && !confirm(`Change the company code to ${code}? Phones already set up keep working. To make every phone enter the new code, use "Remove all phones".`)) return;
-    try { await A.store.setAccessCode(code); A.accDraft = ""; render(); } catch (err) { onErr(err); }
-  };
-  return h("div", { class: "card" },
-    h("h2", { class: "title", style: { marginTop: 0 } }, "Phone access"),
-    h("p", { class: "meta", style: { marginTop: 0 } }, "Company PIN: every driver types it the first time they sign in, then the app makes them pick their own PIN. After that only their own PIN works for them. Anyone without one sees nothing, even with the link."),
-    a === "rules" || A.devices === "rules" ? rulesNote()
-      : a === undefined ? h("div", { class: "meta" }, "Loading…")
-      : has ? h("div", null, "Company PIN: ", h("span", { class: "bigcode" }, a.code))
-      : h("div", { class: "banner" }, "No company PIN set yet. Drivers can't sign in until you set one."),
-    a === "rules" ? null : h("form", { class: "manual", style: { maxWidth: "360px" }, onsubmit: save },
-      h("input", { "data-k": "acc", value: A.accDraft, inputmode: "numeric", placeholder: has ? "New company PIN (4–8 digits)" : "4–8 digits", oninput: e => { A.accDraft = e.target.value; } }),
-      h("button", { class: "primary" }, has ? "Change" : "Set PIN")),
-    Array.isArray(A.devices) ? [
-      h("h3", null, `Signed-in phones (${A.devices.length})`),
-      A.devices.length ? A.devices.map(d => h("div", { class: "pkg" },
-        h("div", { class: "ic" }, "📱"),
-        h("div", { class: "main" }, h("div", { class: "name" }, d.name || "Phone"), h("div", { class: "meta" }, d.at ? `Signed in ${new Date(d.at).toLocaleString()}` : "")),
-        h("button", { class: "small", onclick: () => { if (confirm(`Sign ${d.name || "this phone"} out of that phone? They'll sign in again with their PIN.`)) A.store.removeDevice(d.id).catch(onErr); } }, "Sign out")))
-        : h("div", { class: "meta" }, "None yet."),
-      A.devices.length ? h("button", { class: "small danger", style: { marginTop: "10px" }, onclick: async () => {
-        if (!confirm(`Sign out all ${A.devices.length} phones? Every driver will sign in again with their PIN.`)) return;
-        try { await A.store.removeAllDevices(); } catch (err) { onErr(err); }
-      } }, "Sign out all phones") : null] : null);
+// Drivers named on a manifest who aren't on the "Who are you?" list yet get added (same person spelled differently isn't added twice).
+function addNewNames(crew) {
+  if (A.driverNames === "rules") return [];
+  const have = Array.isArray(A.driverNames) ? A.driverNames.map(personKey) : [];
+  const fresh = mergeCrew(crew).map(c => c.name).filter(n => personKey(n) && !have.includes(personKey(n)));
+  if (fresh.length) A.store.addDriverNames(fresh).catch(e => console.warn(e));
+  return fresh;
 }
+const rulesNote = () => h("div", { class: "banner bad" }, "Publish the new Firestore rules first (Firebase console → Firestore Database → Rules → paste firestore.rules → Publish), then reload this page.");
 function namesCard() {
   const n = A.driverNames;
   if (n === "rules") return h("div", { class: "card" }, h("h2", { class: "title", style: { marginTop: 0 } }, "Drivers"), rulesNote());

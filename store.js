@@ -4,20 +4,18 @@
  *   - DEMO mode otherwise: sample data in this browser's localStorage, no sign-in.
  *
  * Data model (Firestore):
- *   users/{uid}                    { name, email, role: "admin"|"driver", active, truck, employeeId }
- *   driverLogins/{uid}             { employeeId, name, pin }   office-only: the PIN the app made for each driver
+ *   users/{uid}                    { name, username, email, role: "admin", active }   office admins
  *   trucks/{code}                  { code, nickname, plates[] }  e.g. W99 = "White 99", plate X78446
  *   manifests/{id}                 one delivery run for a truck:
  *                                  { title, date, truck, driverIds[], driverNames[], status, stops[], stopsDone{}, createdAt, updatedAt }
  *                                  each stop: { id, name, license, address, manifestNo, invoiceNo, packages[{ tag, item, qty, uom, batch, box }] }
  *   manifests/{id}/scans/{autoId}  { tag, stopId, result, at, via, driverId, driverName, otherStopId?, raw? }
  *                                  stopId "load" = a load-check scan at the dock; stopsDone.load = load check finished
- *   settings/access                { code }            office-only: the company code phones enter once
  *   trucks/_drivers                { names[] }         the "Who are you?" list (kept beside the trucks; not a truck)
- *   devices/{uid}                  { who, name, at, pin|code }  one per phone: which driver is signed in on it
- *   pins/{who}                     { pin, at }         each driver's own PIN (who = "james_stewart"); office can reset
+ *   trucks/_removed                { items{} }         removed trucks, so the office can add them back
+ * Drivers have no accounts: phones sign in invisibly (Anonymous) and drivers pick their name and truck.
  */
-import { firebaseConfig, DEMO, uid, driverEmail, makePin, adminEmail, whoKey } from "./shared.js";
+import { firebaseConfig, DEMO, uid, adminEmail, whoKey } from "./shared.js";
 
 export const FB_VERSION = "10.12.2";
 const FB = `https://www.gstatic.com/firebasejs/${FB_VERSION}/`;
@@ -42,40 +40,17 @@ async function firebaseStore() {
     resetPassword: email => A.sendPasswordResetEmail(auth, email.trim()),
     watchProfile: (id, cb, err) => F.onSnapshot(F.doc(db, "users", id), s => cb(one(s)), err),
 
-    // ---- phones: an invisible anonymous sign-in, approved once with the company code ----
+    // ---- phones: an invisible anonymous sign-in ----
     async ready() {
       await auth.authStateReady();
       if (!auth.currentUser) { try { await A.signInAnonymously(auth); } catch (e) { console.warn("anonymous sign-in unavailable", e.code || e); } }
       return auth.currentUser;
     },
-    // Which driver is signed in on this phone (null if none).
-    async myDevice() {
-      if (!auth.currentUser) return null;
-      try { const s = await F.getDoc(F.doc(db, "devices", auth.currentUser.uid)); return s.exists() ? s.data() : null; } catch (e) { return null; }
-    },
-    // An office admin (signed in on admin.html in this browser) can drive too, as themselves, with no PIN.
+    // An office admin (signed in on admin.html in this browser) can drive too, as themselves.
     async myAdmin() {
       const u = auth.currentUser; if (!u || u.isAnonymous) return null;
       try { const s = await F.getDoc(F.doc(db, "users", u.uid)); const p = s.exists() ? s.data() : null;
         return p && p.role === "admin" && p.name ? { who: whoKey(p.name), name: p.name, admin: true } : null; } catch (e) { return null; }
-    },
-    // Sign a driver in on this phone with their own PIN — or, the first time (no PIN yet), the office code.
-    // Resolves "pin" or "code" (= first time: make a PIN next). Rejects permission-denied if neither fits.
-    async driverSignIn(who, name, secret) {
-      if (!auth.currentUser) {
-        try { await A.signInAnonymously(auth); }
-        catch (e) { const err = new Error("Phone sign-in isn't turned on yet. In Firebase: Authentication → Sign-in method → Anonymous → Enable."); err.code = "setup"; throw err; }
-      }
-      const ref = F.doc(db, "devices", auth.currentUser.uid), base = { who, name: String(name || "").slice(0, 80), at: Date.now() };
-      try { await F.setDoc(ref, { ...base, pin: String(secret) }); return "pin"; }
-      catch (e) { if (e.code !== "permission-denied") throw e; }
-      await F.setDoc(ref, { ...base, code: String(secret) });
-      return "code";
-    },
-    // Make or change this driver's PIN (the phone must be signed in as them), then keep this phone signed in with it.
-    async savePin(who, name, pin) {
-      await F.setDoc(F.doc(db, "pins", who), { pin: String(pin), at: Date.now() });
-      await F.setDoc(F.doc(db, "devices", auth.currentUser.uid), { who, name, pin: String(pin), at: Date.now() });
     },
     watchDriverNames: (cb, err) => F.onSnapshot(F.doc(db, "trucks", "_drivers"), s => cb(s.exists() ? (s.data().names || []) : null), err),
 
@@ -94,25 +69,6 @@ async function firebaseStore() {
     },
 
     // office
-    watchDrivers: (cb, err) => F.onSnapshot(F.query(F.collection(db, "users"), F.where("role", "==", "driver")), s => cb(list(s)), err),
-    // Makes a driver login: Employee ID + a 6-digit PIN the app picks. Returns { id, pin }.
-    async addDriver({ name, employeeId, truck }) {
-      const emp = String(employeeId || "").trim().toUpperCase();
-      if (!emp) throw new Error("An Employee ID is needed for the driver's login.");
-      const pin = makePin();
-      // A second, throwaway Firebase app creates the account so the office stays signed in.
-      const sec = appM.initializeApp(firebaseConfig, "add-driver-" + Date.now());
-      try {
-        const secAuth = A.initializeAuth(sec, { persistence: A.inMemoryPersistence });
-        const cred = await A.createUserWithEmailAndPassword(secAuth, driverEmail(emp), pin);
-        const id = cred.user.uid;
-        await F.setDoc(F.doc(db, "users", id), { name: name.trim(), employeeId: emp, email: driverEmail(emp), truck: (truck || "").trim().toUpperCase(), role: "driver", active: true, createdAt: Date.now() });
-        await F.setDoc(F.doc(db, "driverLogins", id), { employeeId: emp, name: name.trim(), pin, createdAt: Date.now() });
-        await A.signOut(secAuth);
-        return { id, pin };
-      } finally { await appM.deleteApp(sec).catch(() => {}); }
-    },
-    watchLogins: (cb, err) => F.onSnapshot(F.collection(db, "driverLogins"), s => cb(list(s)), err),
     watchTrucks: (cb, err) => F.onSnapshot(F.collection(db, "trucks"), s => cb(list(s)), err),
     saveTruck: (code, { plate, nickname, crew }) => F.setDoc(F.doc(db, "trucks", code), {
       code, ...(nickname ? { nickname } : {}), ...(plate ? { plates: F.arrayUnion(plate) } : {}), ...(crew && crew.length ? { crew } : {}), updatedAt: Date.now() }, { merge: true }),
@@ -148,22 +104,7 @@ async function firebaseStore() {
     changePassword: next => A.updatePassword(auth.currentUser, next),
     // Removing an admin takes away their office access (their old login no longer opens anything).
     removeAdmin: id => F.deleteDoc(F.doc(db, "users", id)),
-    setDriver: (id, patch) => F.updateDoc(F.doc(db, "users", id), patch),
-    // ---- office: company code, approved phones, driver list ----
-    watchAccess: (cb, err) => F.onSnapshot(F.doc(db, "settings", "access"), s => cb(s.exists() ? s.data() : null), err),
-    setAccessCode: code => F.setDoc(F.doc(db, "settings", "access"), { code: String(code).trim(), updatedAt: Date.now() }),
-    watchDevices: (cb, err) => F.onSnapshot(F.collection(db, "devices"), s => cb(list(s).sort((a, b) => (b.at || 0) - (a.at || 0))), err),
-    removeDevice: id => F.deleteDoc(F.doc(db, "devices", id)),
-    watchPins: (cb, err) => F.onSnapshot(F.collection(db, "pins"), s => cb(s.docs.map(d => d.id)), err),   // only who has one, never the PIN
-    async resetPin(who) {
-      await F.deleteDoc(F.doc(db, "pins", who));
-      const s = await F.getDocs(F.query(F.collection(db, "devices"), F.where("who", "==", who)));
-      for (const d of s.docs) await F.deleteDoc(d.ref);
-    },
-    async removeAllDevices() {
-      const s = await F.getDocs(F.collection(db, "devices"));
-      for (let i = 0; i < s.docs.length; i += 400) { const b = F.writeBatch(db); s.docs.slice(i, i + 400).forEach(d => b.delete(d.ref)); await b.commit(); }
-    },
+    // ---- office: the driver name list ----
     setDriverNames: names => F.setDoc(F.doc(db, "trucks", "_drivers"), { names, updatedAt: Date.now() }),
     addDriverNames: names => F.setDoc(F.doc(db, "trucks", "_drivers"), { names: F.arrayUnion(...names), updatedAt: Date.now() }, { merge: true }),
     watchAllManifests: (cb, err) => F.onSnapshot(F.query(F.collection(db, "manifests"), F.orderBy("createdAt", "desc"), F.limit(300)), s => cb(list(s)), err),
@@ -190,7 +131,6 @@ function seed() {
       "demo-driver": { name: "Demo Driver", employeeId: "DEMO1", role: "driver", active: true, truck: "T1" },
       "demo-driver-2": { name: "Second Driver", employeeId: "DEMO2", role: "driver", active: true, truck: "T1" },
     },
-    logins: { "demo-driver": { employeeId: "DEMO1", name: "Demo Driver", pin: "123456" }, "demo-driver-2": { employeeId: "DEMO2", name: "Second Driver", pin: "654321" } },
     trucks: { T1: { code: "T1", nickname: "Demo Truck", plates: [], crew: [{ name: "Demo Driver" }, { name: "Second Driver" }] } },
     manifests: {
       "demo-1": {
@@ -237,23 +177,7 @@ function demoStore(role) {
     onUser(cb) { setTimeout(() => cb({ uid: me, email: st.users[me].email }), 0); return () => {}; },
     signIn: async () => {}, signOut: async () => {}, resetPassword: async () => {},
     ready: async () => ({ uid: me }),
-    async myDevice() { return (st.devices || {})[me] || null; },
-    async driverSignIn(who, name, secret) {
-      const pins = st.pins ||= {}, access = (st.settings && st.settings.access) || {};
-      const deny = () => { const e = new Error("Missing or insufficient permissions."); e.code = "permission-denied"; return e; };
-      if (pins[who]) { if (pins[who] !== String(secret)) throw deny(); (st.devices ||= {})[me] = { who, name, pin: String(secret), at: Date.now() }; save(); return "pin"; }
-      if (!access.code || access.code !== String(secret)) throw deny();
-      (st.devices ||= {})[me] = { who, name, code: String(secret), at: Date.now() }; save(); return "code";
-    },
-    async savePin(who, name, pin) { (st.pins ||= {})[who] = String(pin); (st.devices ||= {})[me] = { who, name, pin: String(pin), at: Date.now() }; save(); },
-    watchPins: cb => watch(() => cb(Object.keys(st.pins || {}))),
-    async resetPin(who) { delete (st.pins || {})[who]; for (const [k, d] of Object.entries(st.devices || {})) if (d.who === who) delete st.devices[k]; save(); },
     watchDriverNames: cb => watch(() => cb(st.settings && st.settings.drivers ? st.settings.drivers.names : null)),
-    watchAccess: cb => watch(() => cb(st.settings && st.settings.access || null)),
-    async setAccessCode(code) { ((st.settings ||= {}).access = { code }); save(); },
-    watchDevices: cb => watch(() => cb(arr(st.devices || {}))),
-    async removeDevice(id) { delete (st.devices || {})[id]; save(); },
-    async removeAllDevices() { st.devices = {}; save(); },
     async setDriverNames(names) { ((st.settings ||= {}).drivers = { names }); save(); },
     async addDriverNames(names) { const d = ((st.settings ||= {}).drivers ||= { names: [] }); for (const n of names) if (!d.names.includes(n)) d.names.push(n); save(); },
     watchProfile: (id, cb) => watch(() => cb(st.users[id] ? { id, ...st.users[id] } : null)),
@@ -273,19 +197,11 @@ function demoStore(role) {
       if (!info) delete m.stopsDone[stopId];
       m.status = status; m.updatedAt = Date.now(); save();
     },
-    watchDrivers: cb => watch(() => cb(arr(st.users, u => u.role === "driver"))),
-    async addDriver({ name, employeeId, truck }) {
-      const id = uid("u"), pin = makePin(), emp = String(employeeId || "").trim().toUpperCase();
-      st.users[id] = { name, employeeId: emp, truck: (truck || "").trim().toUpperCase(), role: "driver", active: true, createdAt: Date.now() };
-      (st.logins ||= {})[id] = { employeeId: emp, name, pin }; save(); return { id, pin };
-    },
-    watchLogins: cb => watch(() => cb(arr(st.logins || {}))),
     watchTrucks: cb => watch(() => cb(arr(st.trucks || {}))),
     async saveTruck(code, { plate, nickname, crew }) {
       const t = ((st.trucks ||= {})[code] ||= { code, plates: [] });
       if (nickname) t.nickname = nickname; if (plate && !t.plates.includes(plate)) t.plates.push(plate); if (crew && crew.length) t.crew = crew; save();
     },
-    async setDriver(id, patch) { Object.assign(st.users[id], patch); save(); },
     async removeTruck(code) { delete (st.trucks || {})[code]; save(); },
     async restoreTruck(code, data) { (st.trucks ||= {})[code] = { ...(data || {}), code }; save(); },
     watchAllManifests: cb => watch(() => cb(arr(st.manifests).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)))),

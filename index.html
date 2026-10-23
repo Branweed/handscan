@@ -75,7 +75,7 @@ function setDriver(d) {
 }
 function onErr(e) { if (isLockedErr(e)) return lockPhone(); console.warn(e); S.error = friendlyError(e); render(); }
 
-/* ---------------- this phone's access: approved once with the company code ---------------- */
+/* ---------------- this phone's access: invisible sign-in; a permission error means the rules need publishing ---------------- */
 const isLockedErr = e => !!e && (e.code === "permission-denied" || /permission/i.test(e.message || ""));
 function lockPhone() { if (!S.locked) { S.locked = true; render(); } }
 function startWatching() {

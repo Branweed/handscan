@@ -21,46 +21,6 @@ service cloud.firestore {
       allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
       allow write: if isAdmin();
     }
-    match /driverLogins/{uid} { allow read, write: if isAdmin(); }
-
-    // The company code: only the office can read or change it. (Rules can still compare against it below.)
-    match /settings/access { allow read, write: if isAdmin(); }
-
-    function myDevice() { return get(/databases/$(database)/documents/devices/$(request.auth.uid)).data; }
-    function pinDoc(who) { return /databases/$(database)/documents/pins/$(who); }
-
-    // Signed-in phones: one per phone, saying which driver is signed in on it ("who").
-    // A driver signs in with THEIR OWN PIN. Only a driver who hasn't made a PIN yet can use the office code
-    // (that's the first time); after that the office code no longer works for them.
-    match /devices/{uid} {
-      allow read: if (signedIn() && request.auth.uid == uid) || isAdmin();
-      allow create, update: if signedIn() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['who', 'name', 'at', 'code', 'pin'])
-        && request.resource.data.who is string && request.resource.data.who.size() > 0 && request.resource.data.who.size() <= 80
-        && (
-          (!exists(pinDoc(request.resource.data.who))
-            && 'code' in request.resource.data
-            && exists(/databases/$(database)/documents/settings/access)
-            && request.resource.data.code == get(/databases/$(database)/documents/settings/access).data.code)
-          || ('pin' in request.resource.data
-            && exists(pinDoc(request.resource.data.who))
-            && request.resource.data.pin == get(pinDoc(request.resource.data.who)).data.pin)
-        );
-      allow delete: if isAdmin();
-    }
-
-    // Each driver's own PIN. Made by the driver right after their first sign-in; changed only by a phone signed in
-    // with the current PIN. The office can see who has one and reset it (delete), but the app never shows PINs.
-    match /pins/{who} {
-      allow read, delete: if isAdmin();
-      allow create: if approvedPhone() && myDevice().who == who
-        && request.resource.data.keys().hasOnly(['pin', 'at'])
-        && request.resource.data.pin is string && request.resource.data.pin.matches('^[0-9]{4,6}$');
-      allow update: if approvedPhone() && myDevice().who == who
-        && ('pin' in myDevice()) && myDevice().pin == resource.data.pin
-        && request.resource.data.keys().hasOnly(['pin', 'at'])
-        && request.resource.data.pin is string && request.resource.data.pin.matches('^[0-9]{4,6}$');
-    }
 
     // Trucks: signed-in phones see them; only the office changes them.
     // trucks/_drivers is the name list on the sign-in screen, so any phone can read it (names only).
