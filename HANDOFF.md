@@ -7,7 +7,7 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Driver app: https://branweed.github.io/handscan/
 - Office: https://branweed.github.io/handscan/admin.html (on a phone it opens only from the Office / Admin button)
 - Code: github.com/Branweed/handscan, GitHub Pages from `main`. A new session may need `add_repo` (push access) first.
-- Firebase project `handscan-72136` (free Spark): Email/Password + Anonymous sign-in, Firestore. Rules come from `firestore.rules` and must be pasted into the console and published (console matches repo as of Oct 22 — PIN/device rules removed; Claude can publish them via Chrome by setting the CodeMirror editor).
+- Firebase project `handscan-72136` (free Spark): Email/Password + Anonymous sign-in, Firestore. Rules come from `firestore.rules` and must be pasted into the console and published (console matches repo as of Oct 28 — includes Route Board `buyers`/`routeStops`; Claude can publish them via Chrome by setting the CodeMirror editor).
 - How-to doc (current as of Oct 22: no PINs, load check, WTI review, scanning tips, Trucks & phones): https://claude.ai/code/artifact/475dd7ec-e6aa-433c-b4e6-467191b693a6 — edit it with the Claude Docs connector, not a publish
 
 ## How it works
@@ -41,7 +41,7 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Claude can't type passwords or create accounts.
 
 ## Waiting on Brandon
-- Route Board: publish the new firestore.rules (adds `buyers` and `routeStops`), set "Trucks leave from", add a real Apex invoice and share "Text read from the file" if anything is misread.
+- Route Board (live, rules published Oct 28): set "Trucks leave from", add a real Apex invoice and share "Text read from the file" if anything is misread.
 - Confirm a non-admin account/phone loads trucks (hard refresh if it still shows "can't load trucks").
 - Upload a manifest with a new driver and check the name shows in the drivers' list.
 - Test v31 at work: time a tag through plastic (goal 1–2 s), far tags with 3–5× zoom, tap to focus, multi-tag photos, WTI review column. If the picture looks too dark, say so (glare exposure).
