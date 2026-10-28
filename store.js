@@ -117,6 +117,14 @@ async function firebaseStore() {
       }
       await F.deleteDoc(F.doc(db, "manifests", id));
     },
+
+    // Route Board (office only): buyers/{license} profiles (buyers/_start = where trucks leave from) and planned stops.
+    watchBuyers: (cb, err) => F.onSnapshot(F.collection(db, "buyers"), s => cb(list(s)), err),
+    saveBuyer: (id, data) => F.setDoc(F.doc(db, "buyers", id), { ...data, updatedAt: Date.now() }, { merge: true }),
+    watchRouteStops: (cb, err) => F.onSnapshot(F.query(F.collection(db, "routeStops"), F.where("createdAt", ">=", Date.now() - 90 * 864e5)), s => cb(list(s)), err),
+    async addRouteStop(d) { const r = await F.addDoc(F.collection(db, "routeStops"), { ...d, createdAt: Date.now(), updatedAt: Date.now() }); return r.id; },
+    updateRouteStop: (id, patch) => F.updateDoc(F.doc(db, "routeStops", id), { ...patch, updatedAt: Date.now() }),
+    deleteRouteStop: id => F.deleteDoc(F.doc(db, "routeStops", id)),
   };
 }
 
@@ -208,5 +216,32 @@ function demoStore(role) {
     async saveManifest(m) { const id = uid("m"); st.manifests[id] = m; save(); return id; },
     async updateManifest(id, patch) { Object.assign(st.manifests[id], patch, { updatedAt: Date.now() }); save(); },
     async deleteManifest(id) { delete st.manifests[id]; delete st.scans[id]; save(); },
+    watchBuyers: cb => watch(() => cb(arr(routes().buyers))),
+    async saveBuyer(id, data) { const b = routes().buyers; b[id] = { ...(b[id] || {}), ...data, updatedAt: Date.now() }; save(); },
+    watchRouteStops: cb => watch(() => cb(arr(routes().stops))),
+    async addRouteStop(d) { const id = uid("r"); routes().stops[id] = { ...d, createdAt: Date.now(), updatedAt: Date.now() }; save(); return id; },
+    async updateRouteStop(id, patch) { const x = routes().stops[id]; if (x) Object.assign(x, patch, { updatedAt: Date.now() }); save(); },
+    async deleteRouteStop(id) { delete routes().stops[id]; save(); },
   };
+  function routes() { return (st.routes ||= seedRoutes()); }
+}
+// Demo Route Board: made-up buyers in real Massachusetts towns, so the map has something to show.
+function seedRoutes() {
+  const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + 1);   // this week's Tuesday
+  const tue = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const B = [
+    ["DEMO-NB1", "Harbor Light Cannabis", "120 Purchase St, New Bedford, MA 02740", 41.6362, -70.9342, "Call ahead", "Receiving 9 am to 3 pm"],
+    ["DEMO-TA1", "Taunton Green Co.", "40 Broadway, Taunton, MA 02780", 41.9001, -71.0898, "", ""],
+    ["DEMO-BR1", "Brockton Leaf", "200 Main St, Brockton, MA 02301", 42.0834, -71.0184, "Use the back lot gate", ""],
+    ["DEMO-PL1", "Plymouth Rock Remedies", "10 Court St, Plymouth, MA 02360", 41.9584, -70.6673, "", "No Friday drops"],
+    ["DEMO-AT1", "Attleboro Botanicals", "5 Park St, Attleboro, MA 02703", 41.9445, -71.2856, "", ""],
+    ["DEMO-HY1", "Cape Shore Wellness", "15 Main St, Hyannis, MA 02601", 41.6525, -70.2881, "Dock 3 only", ""],
+  ];
+  const buyers = { _start: { name: "Fall River", address: "Fall River, MA", lat: 41.7015, lng: -71.155 } };
+  const stops = {};
+  B.forEach(([lic, name, address, lat, lng, driverNote, notes], i) => {
+    buyers[lic] = { name, license: lic, address, lat, lng, geo: "ok", driverNote, notes };
+    stops["demo-r" + i] = { buyerKey: lic, name, license: lic, address, invoiceNo: String(20418 + i * 4), day: i < 2 ? tue : "", truck: i < 2 ? "T1" : "", order: i, createdAt: Date.now() + i, updatedAt: Date.now() };
+  });
+  return { buyers, stops };
 }

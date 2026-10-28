@@ -131,7 +131,8 @@ function render() {
     A.store.demo ? h("div", { class: "banner" }, "Demo mode: data stays in this browser. Open the driver app (index.html) in another tab of this same browser to see runs you send. Add your Firebase config in shared.js to go live.") : null,
     A.error ? h("div", { class: "banner bad" }, A.error, h("button", { class: "small", onclick: () => { A.error = ""; render(); } }, "OK")) : null,
     h("div", { class: "tabs" }, [["upload", "Upload"], ["manifests", `Runs (${A.manifests.filter(m => m.status !== "archived").length})`], ["drivers", "Trucks & phones"]]
-      .map(([k, t]) => h("button", { class: A.tab === k ? "on" : "", onclick: () => { A.tab = k; render(); } }, t))),
+      .map(([k, t]) => h("button", { class: A.tab === k ? "on" : "", onclick: () => { A.tab = k; render(); } }, t)),
+      h("a", { class: "btn", href: "routes.html", style: { minHeight: "40px", borderRadius: "999px", fontSize: "15px", textDecoration: "none", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center" } }, "Route Board")),
     A.tab === "upload" ? uploadView() : A.tab === "manifests" ? manifestsView() : driversView()));
 }
 function loginView() {

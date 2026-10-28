@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#17614a">
+<title>Route Board · Manifest Check</title>
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<style>
+body.board main{max-width:1600px}
+.top a.btn{background:rgba(255,255,255,.16);color:inherit;border:0;min-height:36px;padding:0 12px;font-size:14px;display:inline-flex;align-items:center;text-decoration:none}
+.rbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.rbar .wk{font-weight:800;font-size:17px;min-width:150px;text-align:center}
+.rbar .title{margin:0 6px}
+.cols{display:grid;gap:12px;overflow-x:auto;padding-bottom:8px;align-items:start}
+.col{background:var(--card);border-radius:16px;padding:10px;min-height:440px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);border:2px solid transparent}
+.col.over{border-color:var(--primary);background:var(--soft)}
+.col.today .colh b{color:var(--primary)}
+.colh{display:flex;justify-content:space-between;align-items:baseline;gap:6px;padding:2px 4px 2px}
+.colh b{font-size:15px}
+.hint{text-align:center;padding:18px 4px;font-size:13px}
+.rcard{background:var(--field);border:1px solid var(--line);border-radius:12px;padding:9px 11px;cursor:grab;display:flex;flex-direction:column;gap:2px}
+.rcard:hover,.rcard:focus-visible{border-color:var(--primary);outline:none}
+.rcard.dragging{opacity:.4}
+.rcard b{font-size:14.5px;line-height:1.25}
+.rcard .meta{font-size:12.5px}
+.chips{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
+.chip.note{background:var(--warn-bg);color:var(--warn)}
+.chip.bad{background:var(--bad-bg);color:var(--bad)}
+.day{display:grid;grid-template-columns:minmax(300px,430px) 1fr;gap:14px;align-items:start}
+@media (max-width:880px){.day{grid-template-columns:1fr}}
+#map{height:640px;border-radius:16px;overflow:hidden;background:var(--field);position:sticky;top:76px}
+@media (max-width:880px){#map{height:420px;position:static}}
+.stoprow{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line)}
+.stoprow:first-child{border-top:0;padding-top:0}
+.stoprow .txt{flex:1;min-width:0;cursor:pointer}
+.stoprow .meta{overflow-wrap:anywhere}
+.n{flex:none;width:30px;height:30px;border-radius:50%;background:var(--primary);color:var(--primary-ink);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
+.n.start{border-radius:8px;background:var(--ink);color:var(--card)}
+.updn{display:flex;flex-direction:column;gap:3px}
+.updn button{min-height:28px;padding:0 10px;font-size:12px}
+.pin{width:30px;height:30px;border-radius:50%;background:var(--primary);color:var(--primary-ink);border:3px solid #fff;display:flex;align-items:center;justify-content:center;font:800 13px/1 system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.4);box-sizing:border-box}
+.pin.start{border-radius:8px;background:#17201b;color:#fff}
+.chk{display:flex;gap:8px;align-items:center;font-size:14px}
+.chk input{width:auto;min-height:0;margin:0}
+dialog{border:0;border-radius:18px;padding:0;width:min(920px,96vw);background:var(--card);color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.35)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.dbody{padding:18px;display:flex;flex-direction:column;gap:12px;max-height:86vh;overflow:auto}
+.dbody .title{margin:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label.f>textarea{margin-top:4px}
+.drop{display:block;border:2px dashed var(--line);border-radius:14px;padding:22px 16px;text-align:center;cursor:pointer;background:var(--field)}
+.drop.over{border-color:var(--primary);background:var(--soft)}
+.drop b{display:block;font-size:17px;margin-bottom:4px}
+.draft{border:1px solid var(--line);border-radius:12px;padding:12px}
+.draft.off{opacity:.55}
+.dgrid{display:grid;grid-template-columns:1.2fr 1fr 1.7fr .8fr 1fr;gap:8px;margin-top:8px}
+@media (max-width:900px){.dgrid,.grid2{grid-template-columns:1fr 1fr}}
+@media (max-width:560px){.dgrid,.grid2{grid-template-columns:1fr}}
+pre.raw{white-space:pre-wrap;font-size:12px;max-height:240px;overflow:auto;background:var(--field);border-radius:10px;padding:10px}
+.banner.ok{background:var(--ok-bg);color:var(--ok)}
+</style>
+</head>
+<body class="wide board">
+<header class="top">
+  <h1>Route Board</h1>
+  <span class="who" id="who"></span>
+  <a class="btn" href="admin.html">Office page</a>
+</header>
+<main id="app"><div class="empty">Loading…</div></main>
+<dialog id="dlg"></dialog>
+<script type="module">
+import { h, swap, uid, friendlyError, ORIGINS } from "./shared.js";
+import { createStore } from "./store.js";
+import * as P from "./manifest-parser.js";
+
+const root = document.getElementById("app"), $ = id => document.getElementById(id), dlg = $("dlg");
+const R = { store: null, user: undefined, profile: undefined, loaded: false, buyers: {}, stops: [], trucks: [], start: null,
+  week: mondayOf(new Date()), view: "board", day: "", truck: "", loop: true, error: "", flash: "", unsub: {},
+  map: null, layer: null, fitFor: "", mapEl: h("div", { id: "map" }), geoQ: [], geoRunning: false, geoTried: new Set() };
+
+(async () => {
+  try { R.store = await createStore("admin"); }
+  catch (e) { swap(root, h("div", { class: "card empty" }, "Couldn't load. Check your internet connection and reload.")); return; }
+  R.store.onUser(u => {
+    Object.values(R.unsub).forEach(f => f && f()); R.unsub = {};
+    R.user = u && !u.isAnonymous ? u : null; R.profile = undefined;
+    if (R.user) R.unsub.p = R.store.watchProfile(u.uid, p => {
+      const was = R.profile && R.profile.role; R.profile = p;
+      if (p && p.role === "admin" && was !== "admin") {
+        R.unsub.b = R.store.watchBuyers(l => { R.buyers = Object.fromEntries(l.map(b => [b.id, b])); render(); queueGeo(); }, onErr);
+        R.unsub.s = R.store.watchRouteStops(l => { R.stops = l; R.loaded = true; render(); queueGeo(); }, onErr);
+        R.unsub.t = R.store.watchTrucks(l => { R.trucks = l.filter(t => !String(t.id || "").startsWith("_")).map(t => t.code || t.id); render(); }, () => {});
+      }
+      render();
+    }, onErr);
+    render();
+  });
+})();
+function onErr(e) {
+  console.warn(e);
+  R.error = /permission|insufficient/i.test((e && (e.code || e.message)) || "")
+    ? "The database blocked the Route Board. Publish the updated firestore.rules in the Firebase console (Firestore → Rules), then reload."
+    : friendlyError(e);
+  R.loaded = true; render();
+}
+function flash(t) { R.flash = t; render(); setTimeout(() => { if (R.flash === t) { R.flash = ""; render(); } }, 2500); }
+
+/* ---------------- dates ---------------- */
+function mondayOf(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const fromIso = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+const dayLabel = s => fromIso(s).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+const dayLong = s => fromIso(s).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+
+/* ---------------- buyers and stops ---------------- */
+// A buyer is remembered by license number (or by name when there isn't one), so notes carry over to every future invoice.
+function buyerKey(license, name) {
+  const l = String(license || "").toUpperCase().replace(/[^A-Z0-9-]/g, "");
+  if (l) return l;
+  const n = String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return n ? "n-" + n : uid("b");
+}
+const buyerOf = s => R.buyers[s.buyerKey] || {};
+const nameOf = s => buyerOf(s).name || s.name || "Unnamed buyer";
+const addrOf = s => buyerOf(s).address || s.address || "";
+const noteOf = s => buyerOf(s).driverNote || "";
+const hasLL = b => !!b && typeof b.lat === "number" && typeof b.lng === "number";
+function cityOf(a) {
+  const parts = String(a || "").split(",").map(x => x.trim()).filter(Boolean);
+  if (parts.length >= 3) return parts[parts.length - 2];
+  if (parts.length === 2) return parts[1].replace(/\s*\b[A-Z]{2}\b\.?\s*\d{5}(-\d{4})?\s*$/, "").trim() || parts[1];
+  return parts[0] || "";
+}
+const clip = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
+const byCreated = (a, b) => (a.createdAt || 0) - (b.createdAt || 0);
+const byOrder = (a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || byCreated(a, b);
+const dayStops = d => R.stops.filter(s => s.day === d);
+const truckStops = (d, t) => dayStops(d).filter(s => (s.truck || "") === t).sort(byOrder);
+const nextOrder = (day, truck) => (day ? truckStops(day, truck).reduce((m, x) => Math.max(m, x.order ?? 0), -1) + 1 : 0);
+const chip = (t, cls = "") => h("span", { class: "chip " + cls, title: t }, t);
+function placeChip(s) {
+  const b = buyerOf(s);
+  if (!addrOf(s)) return chip("Needs an address", "bad");
+  if (b.geo === "notfound") return chip("Not found on map", "bad");
+  if (b.geo === "city") return chip("Town only on map");
+  return null;
+}
+const truckList = () => h("datalist", { id: "trucklist" }, [...new Set([...R.trucks, ...R.stops.map(s => s.truck)].filter(Boolean))].sort().map(c => h("option", { value: c })));
+const inp = (v, attrs = {}) => h("input", { value: v || "", ...attrs });
+const lab = (t, el) => h("label", { class: "f" }, t, el);
+
+/* ---------------- shell ---------------- */
+function render() {
+  $("who").textContent = R.profile ? R.profile.name || R.profile.email || "" : "";
+  if (R.user === undefined) return;
+  if (!R.user) return swap(root, h("div", { class: "card login" },
+    h("h2", { class: "title" }, "Sign in first"),
+    h("p", { class: "meta" }, "The Route Board uses your office sign-in. Sign in on the Office page, then come back here."),
+    h("a", { class: "btn primary big", href: "admin.html" }, "Go to the Office page")));
+  if (R.profile === undefined || (R.profile && R.profile.role === "admin" && !R.loaded)) return swap(root, h("div", { class: "empty" }, "Loading…"));
+  if (!R.profile || R.profile.role !== "admin") return swap(root, h("div", { class: "card empty" }, "This account isn't set up as an office admin."));
+  R.start = R.buyers._start || null;
+  swap(root, h("div", null,
+    R.store.demo ? h("div", { class: "banner" }, "Demo mode: sample invoices, and everything stays in this browser.") : null,
+    R.error ? h("div", { class: "banner bad" }, R.error, h("button", { class: "small", onclick: () => { R.error = ""; render(); } }, "OK")) : null,
+    R.flash ? h("div", { class: "banner ok" }, R.flash) : null,
+    R.view === "day" ? dayView() : boardView()));
+  if (R.view === "day") requestAnimationFrame(drawMap);
+}
+
+/* ---------------- the week board ---------------- */
+function boardView() {
+  const today = iso(new Date()), thisWeek = iso(R.week) === iso(mondayOf(new Date()));
+  const days = [0, 1, 2, 3, 4].map(i => iso(addDays(R.week, i)));
+  for (const i of [5, 6]) { const d = iso(addDays(R.week, i)); if (dayStops(d).length) days.push(d); }
+  const cols = [column("", "Unscheduled", R.stops.filter(s => !s.day).sort(byCreated), false),
+    ...days.map(d => column(d, dayLabel(d), dayStops(d).sort((a, b) => String(a.truck || "~").localeCompare(String(b.truck || "~")) || byOrder(a, b)), d === today))];
+  return h("div", null,
+    h("div", { class: "rbar" },
+      h("button", { class: "small", "aria-label": "Previous week", onclick: () => { R.week = addDays(R.week, -7); render(); } }, "‹"),
+      h("span", { class: "wk" }, "Week of " + R.week.toLocaleDateString(undefined, { month: "short", day: "numeric" })),
+      h("button", { class: "small", "aria-label": "Next week", onclick: () => { R.week = addDays(R.week, 7); render(); } }, "›"),
+      thisWeek ? null : h("button", { class: "small ghost", onclick: () => { R.week = mondayOf(new Date()); render(); } }, "This week"),
+      h("span", { style: { flex: "1" } }),
+      h("button", { class: "small", onclick: editStart }, R.start ? "Trucks leave from " + R.start.name : "Set where trucks leave from"),
+      h("button", { class: "small primary", onclick: openAdd }, "Add invoices")),
+    R.stops.length ? null : h("div", { class: "card empty" }, "No invoices yet. Click Add invoices and choose the Apex invoice PDFs, or paste an email."),
+    h("div", { class: "cols", style: { gridTemplateColumns: `repeat(${cols.length}, minmax(200px, 1fr))` } }, cols));
+}
+function column(day, label, list, today) {
+  const el = h("div", { class: "col" + (today ? " today" : ""),
+      ondragover: e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; el.classList.add("over"); },
+      ondragleave: e => { if (!el.contains(e.relatedTarget)) el.classList.remove("over"); },
+      ondrop: e => { e.preventDefault(); el.classList.remove("over"); const id = e.dataTransfer.getData("text/plain"); if (id) moveTo(id, day); } },
+    h("div", { class: "colh" }, h("b", null, label), h("span", { class: "meta" }, list.length ? String(list.length) : "")),
+    list.map(card),
+    list.length ? null : h("div", { class: "meta hint" }, day ? "Drag invoices here" : "Nothing waiting"),
+    day && list.length ? h("button", { class: "small", onclick: () => openDay(day) }, "Map and stop order") : null);
+  return el;
+}
+function card(s) {
+  const note = noteOf(s), el = h("div", { class: "rcard", draggable: "true", tabindex: "0", role: "button", title: "Drag to a day, or click to edit",
+      ondragstart: e => { e.dataTransfer.setData("text/plain", s.id); e.dataTransfer.effectAllowed = "move"; el.classList.add("dragging"); },
+      ondragend: () => el.classList.remove("dragging"),
+      onclick: () => editStop(s.id),
+      onkeydown: e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); editStop(s.id); } } },
+    h("b", null, nameOf(s)),
+    h("span", { class: "meta" }, [cityOf(addrOf(s)), s.invoiceNo ? "Invoice " + s.invoiceNo : ""].filter(Boolean).join(" · ")),
+    h("span", { class: "chips" }, s.truck ? chip(s.truck) : null, note ? h("span", { class: "chip note", title: note }, clip(note, 28)) : null, placeChip(s)));
+  return el;
+}
+async function moveTo(id, day) {
+  const s = R.stops.find(x => x.id === id);
+  if (!s || (s.day || "") === day) return;
+  let truck = s.truck || "";
+  if (!truck && day) { const ts = [...new Set(dayStops(day).map(x => x.truck || ""))]; if (ts.length === 1 && ts[0]) truck = ts[0]; }   // a day on one truck: join it
+  try { await R.store.updateRouteStop(id, { day, truck, order: nextOrder(day, truck) }); } catch (e) { onErr(e); }
+}
+
+/* ---------------- one day: map and stop order ---------------- */
+function openDay(day) { R.view = "day"; R.day = day; R.truck = null; render(); scrollTo(0, 0); }
+function dayTrucks() {
+  return [...new Set(dayStops(R.day).map(s => s.truck || ""))].sort((a, b) => (a === "") - (b === "") || a.localeCompare(b, undefined, { numeric: true }));
+}
+function currentList() {
+  const trucks = dayTrucks();
+  if (!trucks.includes(R.truck)) R.truck = trucks[0] ?? "";
+  return truckStops(R.day, R.truck);
+}
+function dayView() {
+  const list = currentList(), trucks = dayTrucks(), startOk = hasLL(R.start);
+  const miles = routeMiles(list), links = startOk ? mapsLinks(list) : [];
+  const copyBtn = h("button", { onclick: () => copyList(list) }, "Copy stop list");
+  return h("div", null,
+    h("div", { class: "rbar" },
+      h("button", { class: "small", onclick: () => { R.view = "board"; render(); } }, "← Board"),
+      h("h2", { class: "title" }, dayLong(R.day)),
+      trucks.length > 1 || trucks[0] ? h("div", { class: "tabs", style: { margin: "0" } }, trucks.map(t =>
+        h("button", { class: t === R.truck ? "on" : "", onclick: () => { R.truck = t; render(); } }, t || "No truck yet"))) : null),
+    h("div", { class: "day" },
+      h("div", { class: "card" },
+        h("div", { class: "stoprow" }, h("span", { class: "n start" }, "S"),
+          h("div", { class: "txt", onclick: editStart }, h("b", null, R.start ? R.start.name : "Starting point not set"),
+            h("div", { class: "meta" }, R.start ? R.start.address : "Click to set where the trucks leave from"))),
+        list.length ? list.map((s, i) => stopRow(s, i, list)) : h("div", { class: "empty" }, "No stops for this truck."),
+        R.truck === "" && list.length ? assignTruck(list) : null,
+        R.loop && R.start && list.length ? h("div", { class: "stoprow" }, h("span", { class: "n start" }, "S"), h("div", { class: "txt" }, h("b", null, "Back to " + R.start.name))) : null,
+        h("p", { class: "meta" }, miles ? `Roughly ${Math.round(miles)} miles${R.loop ? " round trip" : ""}. Google Maps has the real drive time.` : ""),
+        h("label", { class: "chk", style: { margin: "4px 0 12px" } },
+          h("input", { type: "checkbox", checked: R.loop, onchange: e => { R.loop = e.target.checked; render(); } }), "End back where the truck started"),
+        h("div", { class: "btns" },
+          h("button", { class: "primary", disabled: list.length < 2, onclick: suggest }, "Suggest stop order"),
+          links.map((l, k) => h("a", { class: "btn", href: l, target: "_blank", rel: "noopener" }, links.length > 1 ? `Open in Google Maps, part ${k + 1}` : "Open in Google Maps")),
+          copyBtn)),
+      R.mapEl));
+}
+function assignTruck(list) {
+  const t = inp("", { list: "trucklist", placeholder: "e.g. W99", style: "max-width:130px;min-height:36px;text-transform:uppercase" });
+  return h("form", { class: "btns", style: { alignItems: "center", margin: "10px 0 4px" }, onsubmit: async e => {
+      e.preventDefault();
+      const code = t.value.trim().toUpperCase();
+      if (!code) return;
+      const base = nextOrder(R.day, code);
+      try { await Promise.all(list.map((s, k) => R.store.updateRouteStop(s.id, { truck: code, order: base + k }))); R.truck = code; render(); } catch (err) { onErr(err); }
+    } }, h("span", { class: "meta" }, "Put these stops on truck"), t, h("button", { class: "small" }, "Assign"), truckList());
+}
+function stopRow(s, i, list) {
+  const note = noteOf(s);
+  return h("div", { class: "stoprow" },
+    h("span", { class: "n" }, String(i + 1)),
+    h("div", { class: "txt", onclick: () => editStop(s.id), title: "Click to edit" },
+      h("b", null, nameOf(s)), h("div", { class: "meta" }, addrOf(s) || "No address yet"),
+      h("div", { class: "chips" }, s.invoiceNo ? chip("Invoice " + s.invoiceNo) : null, note ? h("span", { class: "chip note" }, note) : null, placeChip(s))),
+    h("div", { class: "updn" },
+      h("button", { class: "small", "aria-label": "Move up", disabled: i === 0, onclick: () => reorder(list, i, i - 1) }, "▲"),
+      h("button", { class: "small", "aria-label": "Move down", disabled: i === list.length - 1, onclick: () => reorder(list, i, i + 1) }, "▼")));
+}
+function reorder(list, i, j) { const a = list.slice(); [a[i], a[j]] = [a[j], a[i]]; saveOrder(a); }
+function saveOrder(arr) { return Promise.all(arr.map((s, k) => (s.order === k ? null : R.store.updateRouteStop(s.id, { order: k })))).catch(onErr); }
+
+async function suggest() {
+  if (!hasLL(R.start)) { editStart(); return; }
+  const list = currentList(), here = list.filter(s => hasLL(buyerOf(s))), missing = list.filter(s => !hasLL(buyerOf(s)));
+  const order = bestOrder(R.start, here.map(buyerOf), R.loop);
+  await saveOrder([...order.map(k => here[k]), ...missing]);
+  flash(missing.length ? `Stops ordered. ${missing.length} without a map location went to the end.` : "Stops ordered by distance.");
+}
+// Shortest loop by straight-line distance: nearest stop first, then 2-opt swaps until nothing improves. Fine for a day's stops.
+function bestOrder(start, pts, loop) {
+  const all = [start, ...pts], D = all.map(a => all.map(b => miles(a, b)));
+  const left = new Set(pts.map((_, i) => i + 1)), tour = [0];
+  let cur = 0;
+  while (left.size) { let best = null, bd = Infinity; for (const k of left) if (D[cur][k] < bd) { bd = D[cur][k]; best = k; } tour.push(best); left.delete(best); cur = best; }
+  const len = t => { let s = 0; for (let i = 1; i < t.length; i++) s += D[t[i - 1]][t[i]]; return loop ? s + D[t[t.length - 1]][0] : s; };
+  let bestLen = len(tour), improved = true;
+  while (improved) {
+    improved = false;
+    for (let i = 1; i < tour.length - 1; i++) for (let j = i + 1; j < tour.length; j++) {
+      const t = [...tour.slice(0, i), ...tour.slice(i, j + 1).reverse(), ...tour.slice(j + 1)], l = len(t);
+      if (l < bestLen - 1e-9) { tour.splice(0, tour.length, ...t); bestLen = l; improved = true; }
+    }
+  }
+  return tour.slice(1).map(k => k - 1);
+}
+function miles(a, b) {
+  const r = x => (x * Math.PI) / 180, dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
+  const q = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 3958.8 * 2 * Math.asin(Math.sqrt(q));
+}
+function routeMiles(list) {
+  const pts = [R.start, ...list.map(buyerOf)].filter(hasLL);
+  if (!hasLL(R.start) || pts.length < 2) return 0;
+  let m = 0; for (let i = 1; i < pts.length; i++) m += miles(pts[i - 1], pts[i]);
+  if (R.loop) m += miles(pts[pts.length - 1], pts[0]);
+  return m * 1.25;   // roads aren't straight lines: a rough allowance
+}
+// Google Maps takes up to 9 stops between start and finish in one link, so long days split into parts.
+function mapsLinks(list) {
+  const loc = b => (b.geo === "manual" && hasLL(b) ? `${b.lat},${b.lng}` : b.address || (hasLL(b) ? `${b.lat},${b.lng}` : ""));
+  const pts = [R.start, ...list.map(s => ({ ...buyerOf(s), address: addrOf(s) })).filter(b => loc(b))];
+  if (R.loop) pts.push(R.start);
+  if (pts.length < 2) return [];
+  const out = [], e = encodeURIComponent;
+  for (let i = 0; i < pts.length - 1;) {
+    const j = Math.min(i + 10, pts.length - 1), mid = pts.slice(i + 1, j);
+    out.push("https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=" + e(loc(pts[i])) + "&destination=" + e(loc(pts[j])) +
+      (mid.length ? "&waypoints=" + e(mid.map(loc).join("|")) : ""));
+    i = j;
+  }
+  return out;
+}
+async function copyList(list) {
+  const lines = [`${dayLong(R.day)}${R.truck ? " · " + R.truck : ""}`, R.start ? `Start: ${R.start.name}, ${R.start.address}` : "",
+    ...list.map((s, i) => `${i + 1}. ${nameOf(s)}, ${addrOf(s) || "no address"}${s.invoiceNo ? ` (invoice ${s.invoiceNo})` : ""}${noteOf(s) ? `. ${noteOf(s)}` : ""}`)];
+  try { await navigator.clipboard.writeText(lines.filter(Boolean).join("\n")); flash("Stop list copied."); }
+  catch (e) { R.error = "Couldn't copy. Your browser blocked the clipboard."; render(); }
+}
+
+/* ---------------- map (OpenStreetMap through Leaflet) ---------------- */
+let leafletP = null;
+function loadLeaflet() {
+  return (leafletP ||= new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js";
+    s.onload = () => res(window.L); s.onerror = () => { leafletP = null; rej(new Error("map")); };
+    document.head.append(s);
+  }));
+}
+const pin = (L, text, start) => L.divIcon({ className: "", html: `<div class="pin${start ? " start" : ""}">${text}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
+const popup = (title, sub, hint) => h("div", null, h("b", null, title), sub ? h("div", null, sub) : null, hint ? h("div", { class: "meta" }, hint) : null);
+async function drawMap() {
+  if (R.view !== "day" || !R.mapEl.isConnected) return;
+  let L;
+  try { L = await loadLeaflet(); }
+  catch (e) { R.mapEl.replaceChildren(h("div", { class: "empty" }, "The map couldn't load. Check the internet connection and reload.")); return; }
+  if (!R.map) {
+    R.map = L.map(R.mapEl).setView([41.95, -71.0], 9);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(R.map);
+    R.layer = L.layerGroup().addTo(R.map);
+  }
+  R.map.invalidateSize();
+  R.layer.clearLayers();
+  const list = currentList(), pts = [];
+  if (hasLL(R.start)) {
+    L.marker([R.start.lat, R.start.lng], { icon: pin(L, "S", true), title: R.start.name }).bindPopup(popup(R.start.name, R.start.address)).addTo(R.layer);
+    pts.push([R.start.lat, R.start.lng]);
+  }
+  list.forEach((s, i) => {
+    const b = buyerOf(s);
+    if (!hasLL(b)) return;
+    const m = L.marker([b.lat, b.lng], { icon: pin(L, String(i + 1)), draggable: true, title: nameOf(s) })
+      .bindPopup(popup(nameOf(s), addrOf(s), "Pin in the wrong spot? Drag it to the right place.")).addTo(R.layer);
+    m.on("dragend", () => { const p = m.getLatLng(); R.store.saveBuyer(s.buyerKey, { lat: p.lat, lng: p.lng, geo: "manual" }).catch(onErr); });
+    pts.push([b.lat, b.lng]);
+  });
+  const line = R.loop && hasLL(R.start) && pts.length > 1 ? [...pts, pts[0]] : pts;
+  if (line.length > 1) L.polyline(line, { color: getComputedStyle(document.documentElement).getPropertyValue("--primary").trim() || "#17614a", weight: 4, opacity: 0.8 }).addTo(R.layer);
+  const key = R.day + "|" + R.truck + "|" + pts.length;
+  if (pts.length && R.fitFor !== key) { R.map.fitBounds(L.latLngBounds(pts).pad(0.15), { maxZoom: 13 }); R.fitFor = key; }
+}
+
+/* ---------------- finding addresses on the map (OpenStreetMap's free lookup, one a second) ---------------- */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function queueGeo() {
+  const keys = new Set(R.stops.map(s => s.buyerKey).filter(Boolean));
+  for (const k of keys) {
+    const b = R.buyers[k];
+    if (!b || hasLL(b) || b.geo || !b.address || R.geoQ.includes(k) || R.geoTried.has(k)) continue;
+    R.geoQ.push(k);
+  }
+  runGeo();
+}
+async function runGeo() {
+  if (R.geoRunning) return;
+  R.geoRunning = true;
+  try {
+    while (R.geoQ.length) {
+      const k = R.geoQ.shift(), b = R.buyers[k];
+      R.geoTried.add(k);
+      if (!b || hasLL(b) || !b.address) continue;
+      let patch;
+      try { patch = await geocode(b.address); } catch (e) { R.geoTried.delete(k); break; }   // offline: try again later
+      await R.store.saveBuyer(k, patch).catch(onErr);
+      await sleep(1100);
+    }
+  } finally { R.geoRunning = false; }
+}
+// Buyers are all in Massachusetts, so ", MA" is added when the address doesn't say. Falls back to the town.
+async function geocode(address) {
+  let r = await nominatim(/\b(MA|Mass\.?|Massachusetts)\b/i.test(address) ? address : address + ", MA");
+  if (r) return { ...r, geo: "ok" };
+  const town = cityOf(address);
+  if (town && town !== address) { await sleep(1100); r = await nominatim(town + ", MA"); if (r) return { ...r, geo: "city" }; }
+  return { geo: "notfound" };
+}
+async function nominatim(q) {
+  const res = await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=us&q=" + encodeURIComponent(q));
+  if (!res.ok) throw new Error("lookup " + res.status);
+  const j = await res.json();
+  return j && j[0] ? { lat: +j[0].lat, lng: +j[0].lon } : null;
+}
+
+/* ---------------- dialogs ---------------- */
+function openDialog(node) { dlg.replaceChildren(node); if (!dlg.open) dlg.showModal(); }
+function closeDialog() { dlg.close(); dlg.replaceChildren(); }
+
+function editStop(id) {
+  const s = R.stops.find(x => x.id === id);
+  if (!s) return;
+  const b = buyerOf(s), msg = h("div", { class: "err" });
+  const f = { name: inp(nameOf(s)), license: inp(b.license || s.license, { style: "text-transform:uppercase" }), address: inp(addrOf(s)),
+    invoiceNo: inp(s.invoiceNo), day: inp(s.day, { type: "date" }), truck: inp(s.truck, { list: "trucklist", style: "text-transform:uppercase", placeholder: "e.g. W99" }),
+    driverNote: inp(b.driverNote, { placeholder: "e.g. Use the back lot gate" }), notes: h("textarea", { rows: 3, placeholder: "Receiving hours, who to ask for, anything Brian should know" }) };
+  f.notes.value = b.notes || "";
+  openDialog(h("form", { class: "dbody", onsubmit: async e => {
+      e.preventDefault();
+      const name = f.name.value.trim(), license = f.license.value.trim().toUpperCase(), address = f.address.value.trim();
+      if (!name && !license) { msg.textContent = "Enter the buyer's name or license."; return; }
+      const key = license ? buyerKey(license) : s.buyerKey || buyerKey("", name), old = R.buyers[key] || {};
+      const bp = { name, license, address, driverNote: f.driverNote.value.trim(), notes: f.notes.value.trim() };
+      if ((old.address || "") !== address) Object.assign(bp, { lat: null, lng: null, geo: null });
+      const day = f.day.value || "", truck = f.truck.value.trim().toUpperCase();
+      const sp = { buyerKey: key, name, license, address, invoiceNo: f.invoiceNo.value.trim(), day, truck };
+      if (day !== (s.day || "") || truck !== (s.truck || "")) sp.order = nextOrder(day, truck);
+      try { await R.store.saveBuyer(key, bp); await R.store.updateRouteStop(id, sp); closeDialog(); }
+      catch (err) { msg.textContent = friendlyError(err); }
+    } },
+    h("h2", { class: "title" }, nameOf(s)),
+    h("div", { class: "grid2" }, lab("Buyer", f.name), lab("License", f.license)),
+    lab("Street address", f.address),
+    h("div", { class: "grid2" }, lab("Invoice #", f.invoiceNo), lab("Delivery day (blank = unscheduled)", f.day)),
+    h("div", { class: "grid2" }, lab("Truck", f.truck), lab("Note for the driver", f.driverNote)),
+    lab("Office notes about this buyer (drivers never see these)", f.notes),
+    truckList(), msg,
+    h("div", { class: "btns" },
+      h("button", { class: "primary" }, "Save"),
+      h("button", { type: "button", onclick: closeDialog }, "Cancel"),
+      h("span", { style: { flex: "1" } }),
+      h("button", { type: "button", class: "danger", onclick: async () => {
+        if (!confirm("Remove this invoice from the board? The buyer's profile and notes stay.")) return;
+        try { await R.store.deleteRouteStop(id); closeDialog(); } catch (err) { msg.textContent = friendlyError(err); }
+      } }, "Remove from board"))));
+}
+
+function editStart() {
+  const s = R.start || {}, msg = h("div", { class: "err" });
+  const name = inp(s.name || "Fall River"), address = inp(s.address, { placeholder: "Street, town" });
+  openDialog(h("form", { class: "dbody", onsubmit: async e => {
+      e.preventDefault();
+      const a = address.value.trim();
+      if (!a) { msg.textContent = "Enter the address the trucks leave from."; return; }
+      let ll = hasLL(s) && a === s.address ? { lat: s.lat, lng: s.lng } : null;
+      if (!ll) {
+        msg.textContent = "Finding it on the map…";
+        try { const r = await geocode(a); ll = hasLL(r) ? r : null; } catch (err) { msg.textContent = "Couldn't reach the map lookup. Check the internet connection."; return; }
+        if (!ll) { msg.textContent = "Couldn't find that address. Check the spelling and try again."; return; }
+      }
+      try { await R.store.saveBuyer("_start", { name: name.value.trim() || "Start", address: a, lat: ll.lat, lng: ll.lng }); closeDialog(); }
+      catch (err) { msg.textContent = friendlyError(err); }
+    } },
+    h("h2", { class: "title" }, "Where the trucks leave from"),
+    h("p", { class: "meta" }, "Every route starts here, and ends here too when “End back where the truck started” is on."),
+    lab("Name", name), lab("Street address", address), msg,
+    h("div", { class: "btns" }, h("button", { class: "primary" }, "Save"), h("button", { type: "button", onclick: closeDialog }, "Cancel"))));
+}
+
+/* ---------------- adding invoices ---------------- */
+// Apex invoices and emails: buyer, license, ship-to address, invoice # and delivery date from "Label: value" text.
+// PDF text arrives as cells split by " | ", so a label's value can sit in the next cell or on the lines below it.
+const OWN = new Set(Object.keys(ORIGINS));
+const BLOCKS = [/^(?:ship(?:ping)?\s*to|deliver(?:y)?\s*to|delivery\s*address)\b/i, /^(?:buyer|customer|retailer|recipient|sold\s*to|destination)\b(?!\s*licen)/i, /^bill(?:ed)?\s*to\b/i];
+const LABELISH = /^[A-Za-z][\w #./()-]{0,30}:/;
+const addrLike = t => /^\d+[A-Za-z]?\s+\S/.test(t) || /\b\d{5}(-\d{4})?\b/.test(t) || /,\s*(MA|Massachusetts)\b/i.test(t);
+function toIso(t) {
+  let m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/); if (m) return t;
+  m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  return m ? `${m[3].length === 2 ? "20" + m[3] : m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}` : "";
+}
+function readInvoice(text) {
+  const rows = String(text || "").split(/\r?\n/).map(l => l.split(/\s+\|\s+/).map(c => c.replace(/\s+/g, " ").trim()).filter(Boolean)).filter(r => r.length);
+  const flat = rows.map(r => r.join("  ")), out = { name: "", license: "", address: "", invoiceNo: "", day: "" };
+  const find = re => { for (const l of flat) { const m = l.match(re); if (m) return m[1]; } return ""; };
+  out.invoiceNo = find(/\binvoice\s*(?:#|no\.?|number|num)\s*:?\s*([A-Z0-9][A-Z0-9-]*)/i) || find(/\binvoice\s*:?\s*#?\s*(\d{3,})/i);
+  const lic = find(/licen[cs]e\s*(?:#|no\.?|number)?\s*:?\s*([A-Z]{1,4}-?\d{4,8}[A-Z0-9-]*)/i).toUpperCase();
+  out.license = lic && !OWN.has(lic) ? lic : (String(text).toUpperCase().match(/\bM[A-Z]{1,2}\d{6}\b/g) || []).find(x => !OWN.has(x)) || "";
+  out.day = toIso(find(/(?:delivery|ship|requested|scheduled)\s*(?:date)?\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2})/i));
+  const blockAt = (i, c, re) => {
+    const rest = rows[i][c].replace(re, "").replace(/^[\s:#.-]+/, "").trim(), b = [];
+    if (rest) b.push(rest); else if (rows[i][c + 1] && !LABELISH.test(rows[i][c + 1]) && !BLOCKS.some(x => x.test(rows[i][c + 1]))) b.push(rows[i][c + 1]);
+    for (let j = i + 1; j < Math.min(rows.length, i + 5); j++) {
+      const r = rows[j], v = r.length === rows[i].length ? r[c] : r.length === 1 ? r[0] : r[Math.min(c, r.length - 1)];
+      if (!v || LABELISH.test(v) || BLOCKS.some(x => x.test(v))) break;
+      b.push(v);
+    }
+    return b;
+  };
+  for (const re of BLOCKS) {
+    let b = null;
+    for (let i = 0; i < rows.length && !b; i++) for (let c = 0; c < rows[i].length && !b; c++) if (re.test(rows[i][c])) b = blockAt(i, c, re);
+    if (!b || !b.length) continue;
+    const k = b.findIndex(addrLike);
+    if (!out.name) out.name = (k === -1 ? b[0] : b.slice(0, k)[0]) || "";
+    if (!out.address && k >= 0) out.address = /\b\d{5}\b|,\s*(MA|Massachusetts)\b/i.test(b[k]) || !b[k + 1] ? b[k] : b[k] + ", " + b[k + 1];
+  }
+  return out;
+}
+
+function openAdd() {
+  const drafts = [], list = h("div", { style: { display: "flex", flexDirection: "column", gap: "10px" } }), msg = h("div", { class: "err" });
+  const status = h("div", { class: "meta" });
+  const addBtn = h("button", { class: "primary", type: "button", onclick: () => saveDrafts() }, "Add to board");
+  const knownStop = no => no && R.stops.some(x => x.invoiceNo && x.invoiceNo === no);
+  function draft(x) {
+    const d = { id: uid("d"), use: true, name: "", license: "", address: "", invoiceNo: "", day: "", from: "", raw: "", failed: false, ...x };
+    d.license = String(d.license || "").toUpperCase();
+    const b = d.license && R.buyers[buyerKey(d.license)];
+    if (b) { d.known = true; d.name ||= b.name || ""; d.address ||= b.address || ""; }
+    if (knownStop(d.invoiceNo)) { d.dup = true; d.use = false; }
+    drafts.push(d);
+  }
+  function addResult(r, from) {
+    const raw = (r && r.rawText) || "", L = readInvoice(raw), one = k => (stops.length === 1 ? L[k] : "");
+    const stops = ((r && r.stops) || []).map(s => ({ ...s, name: /^Stop \d+/.test(s.name || "") ? "" : s.name })).filter(s => s.name || s.license || s.address);
+    if (!stops.length) draft({ from, raw, ...L, invoiceNo: L.invoiceNo || (r && r.invoiceNo) || "", failed: !(L.name || L.license || L.address) });
+    else for (const s of stops) draft({ from, raw, name: s.name || one("name"), license: s.license || one("license"), address: s.address || one("address"),
+      invoiceNo: s.invoiceNo || r.invoiceNo || L.invoiceNo, day: L.day });
+  }
+  async function readFiles(files) {
+    for (const f of files) {
+      status.textContent = "Reading " + f.name + "…";
+      try { addResult(/\.(eml|txt)$/i.test(f.name) ? P.parseText(await f.text(), f.name) : await P.parseManifestFile(f), f.name); }
+      catch (e) { console.warn(e); addResult(null, f.name); }
+    }
+    status.textContent = ""; redraw();
+  }
+  function row(d) {
+    const bind = (k, attrs = {}) => h("input", { value: d[k] || "", oninput: e => { d[k] = e.target.value; }, ...attrs });
+    return h("div", { class: "draft" + (d.use ? "" : " off") },
+      h("div", { class: "rb" },
+        h("label", { class: "chk" }, h("input", { type: "checkbox", checked: d.use, onchange: e => { d.use = e.target.checked; redraw(); } }), h("b", null, d.from || "Typed in")),
+        h("span", { class: "chips" }, d.known ? chip("Known buyer") : null, d.dup ? chip("Already on the board", "bad") : null,
+          d.failed ? chip("Couldn't read it. Fill it in", "bad") : null)),
+      h("div", { class: "dgrid" }, lab("Buyer", bind("name")), lab("License", bind("license", { style: "text-transform:uppercase" })),
+        lab("Street address", bind("address")), lab("Invoice #", bind("invoiceNo")), lab("Delivery day (optional)", bind("day", { type: "date" }))),
+      d.raw ? h("details", null, h("summary", { class: "meta" }, "Text read from the file"), h("pre", { class: "raw" }, d.raw.slice(0, 5000))) : null);
+  }
+  function redraw() {
+    list.replaceChildren(...drafts.map(row));
+    const n = drafts.filter(d => d.use).length;
+    addBtn.textContent = n ? `Add ${n} to board` : "Add to board"; addBtn.disabled = !n;
+  }
+  async function saveDrafts() {
+    const use = drafts.filter(d => d.use);
+    if (use.some(d => !d.name.trim() && !d.license.trim())) { msg.textContent = "Each invoice needs at least a buyer name or license."; return; }
+    addBtn.disabled = true; addBtn.textContent = "Adding…"; msg.textContent = "";
+    try {
+      for (const d of use) {
+        const license = d.license.trim().toUpperCase(), name = d.name.trim(), address = d.address.trim();
+        const key = buyerKey(license, name), old = R.buyers[key] || {};
+        const bp = { name: name || old.name || "", license: license || old.license || "" };
+        if (address && address !== old.address) Object.assign(bp, { address, lat: null, lng: null, geo: null });
+        await R.store.saveBuyer(key, bp);
+        await R.store.addRouteStop({ buyerKey: key, name: bp.name, license: bp.license, address: address || old.address || "", invoiceNo: d.invoiceNo.trim(),
+          day: d.day || "", truck: "", order: nextOrder(d.day || "", "") });
+      }
+      closeDialog(); flash(`Added ${use.length === 1 ? "1 invoice" : use.length + " invoices"} to the board.`);
+    } catch (e) { msg.textContent = friendlyError(e); redraw(); }
+  }
+  const fileIn = h("input", { type: "file", multiple: true, hidden: true, accept: ".pdf,.csv,.tsv,.txt,.eml,application/pdf,text/plain,text/csv,message/rfc822",
+    onchange: () => { readFiles([...fileIn.files]); fileIn.value = ""; } });
+  const drop = h("label", { class: "drop",
+      ondragover: e => { e.preventDefault(); drop.classList.add("over"); }, ondragleave: () => drop.classList.remove("over"),
+      ondrop: e => { e.preventDefault(); drop.classList.remove("over"); readFiles([...e.dataTransfer.files]); } },
+    h("b", null, "Choose Apex invoice PDFs"), h("span", { class: "meta" }, "Select several at once, or drop them here. Saved emails (.eml) work too."), fileIn);
+  const paste = h("textarea", { rows: 4, placeholder: "Or paste the text of an Apex email here" });
+  openDialog(h("div", { class: "dbody" },
+    h("h2", { class: "title" }, "Add invoices"),
+    drop, paste,
+    h("div", { class: "btns" },
+      h("button", { type: "button", onclick: () => { const t = paste.value.trim(); if (!t) return; addResult(P.parseText(t, "Pasted email"), "Pasted email"); paste.value = ""; redraw(); } }, "Read pasted text"),
+      h("button", { type: "button", onclick: () => { draft({ from: "Typed in" }); redraw(); } }, "Add one by hand")),
+    status, list, msg,
+    h("p", { class: "meta" }, "Check what was read before adding. Buyers are remembered by license, so their address and notes fill in next time."),
+    h("div", { class: "btns" }, addBtn, h("button", { type: "button", onclick: closeDialog }, "Cancel"))));
+  redraw();
+}
+</script>
+</body>
+</html>

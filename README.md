@@ -59,6 +59,14 @@ Most orders ship as two sets: a manifest + WTI from **Fall River (MP281319)** an
 
 ---
 
+## Route Board (planning deliveries)
+**`routes.html`** (the **Route Board** button on the office page) is where the week gets planned from Apex invoices, before any manifests exist.
+1. **Add invoices:** choose the Apex invoice PDFs (or paste the email text). Check what was read and add them to the board.
+2. **Drag each invoice to a day.** Click a card to set the truck, fix the address, or add notes. Buyers are remembered by license, so notes carry over to every future invoice. Office notes never go to drivers.
+3. **Map and stop order:** opens one day on a map. **Suggest stop order** puts the stops in the shortest loop from where the trucks leave, and **Open in Google Maps** gives the driving route with live traffic.
+
+The first time, click **Set where trucks leave from**. Addresses are looked up on OpenStreetMap; if a pin lands in the wrong spot, drag it to the right one and it's remembered.
+
 ## How scanning works
 
 | What the driver sees | When |

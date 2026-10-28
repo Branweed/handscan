@@ -26,6 +26,10 @@ service cloud.firestore {
     // trucks/_drivers is the name list on the sign-in screen, so any phone can read it (names only).
     match /trucks/{code} { allow read: if canSeeRuns() || (code == '_drivers' && signedIn()); allow write: if isAdmin(); }
 
+    // Route Board: buyer profiles (with office-only notes) and planned stops. Office only; phones see none of it.
+    match /buyers/{id} { allow read, write: if isAdmin(); }
+    match /routeStops/{id} { allow read, write: if isAdmin(); }
+
     // Runs. Phones can only mark stops (and the load check) finished and add scans; the office does everything else.
     match /manifests/{mid} {
       function run() { return get(/databases/$(database)/documents/manifests/$(mid)).data; }

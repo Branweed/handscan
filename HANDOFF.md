@@ -18,6 +18,15 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Load check at the dock (Done loading; office sees X of Y loaded). Delivery scans: Match / Wrong stop / Not on manifest / Already scanned. Offline scanning, syncs later, CSV export.
 - Office → Trucks & phones: Drivers (add/remove/add back; new names on an uploaded manifest are added as soon as the files are read, and the review page says who), Trucks (add/edit/remove, removed copies in `trucks/_removed`), Office admins (add/remove/change password).
 
+## Route Board (routes.html, v32, new)
+- Office page for Brian, linked from the Office tabs ("Route Board"). Same admin sign-in; not a phone page.
+- Add invoices: Apex invoice PDFs (read by `parseManifestFile`, then `readInvoice` in routes.html for Buyer/Ship To/License/Invoice #/Delivery date), pasted email text, .eml, or by hand. Review before adding.
+- Week board: Unscheduled + Mon–Fri (Sat/Sun only if used); drag cards to days. A card dropped on a one-truck day joins that truck.
+- Day view: per-truck tabs, stop list with ▲▼, Suggest stop order (nearest + 2-opt, straight-line), Open in Google Maps (9 waypoints per link, splits into parts), Copy stop list, OpenStreetMap map via Leaflet (jsdelivr), drag a pin to fix a location.
+- Addresses are looked up with OpenStreetMap Nominatim (1/s, saved on the buyer; ", MA" added; falls back to the town).
+- Firestore (office-only rules): `buyers/{license}` { name, license, address, lat, lng, geo, notes (office), driverNote }, `buyers/_start` (where trucks leave from), `routeStops/{id}` { buyerKey, name, license, address, invoiceNo, day, truck, order }. Watches the last 90 days.
+- Next: (1) on Upload, sort a truck's stops by the plan (match license/invoice #, same day) and pre-pick the truck; (2) driver run screen "Navigate" button + driverNote on the run (runs are visible to anyone with the link, so office notes never go there); (3) tune `readInvoice` with a real Apex invoice.
+
 ## Scanner (barcode-scanner.js)
 - Live camera: 1080p, continuous focus, tap the picture to focus there (3 s, then auto). Zoom button 1×–5× (whatever the phone allows), starts 2×, remembered.
 - Each frame read one of 4 ways: center crop, "tight" (middle of the aim box enlarged ~2.4× for far tags), high-contrast crop (sleeve glare), full frame. The view that last read a tag gets every other frame and is remembered (`bcs-favor`); first-time default is high-contrast.
@@ -27,11 +36,12 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Not testable here (no browser download); syntax-checked only. Goal from Brandon: a tag through plastic reads in 1–2 s (was 3–4 s).
 
 ## Publishing
-- Edit, bump `VERSION` in `sw.js` (now `manifest-check-v31`), push. Rule changes also go in the Firebase console.
+- Edit, bump `VERSION` in `sw.js` (now `manifest-check-v32`), push. Rule changes also go in the Firebase console.
 - Demo mode: apiKey starting with "PASTE" in `shared.js`.
 - Claude can't type passwords or create accounts.
 
 ## Waiting on Brandon
+- Route Board: publish the new firestore.rules (adds `buyers` and `routeStops`), set "Trucks leave from", add a real Apex invoice and share "Text read from the file" if anything is misread.
 - Confirm a non-admin account/phone loads trucks (hard refresh if it still shows "can't load trucks").
 - Upload a manifest with a new driver and check the name shows in the drivers' list.
 - Test v31 at work: time a tag through plastic (goal 1–2 s), far tags with 3–5× zoom, tap to focus, multi-tag photos, WTI review column. If the picture looks too dark, say so (glare exposure).
