@@ -6,26 +6,28 @@ Repo is public: no passwords, driver names or employee IDs here.
 ## Live
 - Driver app: https://branweed.github.io/handscan/
 - Office: https://branweed.github.io/handscan/admin.html (on a phone it opens only from the Office / Admin button)
-- Code: github.com/Branweed/handscan, GitHub Pages from `main`. A new session may need `add_repo` (push access) first.
+- Code: github.com/Branweed/handscan, GitHub Pages from `main`. A new session may need `add_repo` (push access) first. A claude.ai chat without push access clones the public repo and hands back the changed files (zip) for Brandon to upload on GitHub.
 - Firebase project `handscan-72136` (free Spark): Email/Password + Anonymous sign-in, Firestore. Rules come from `firestore.rules` and must be pasted into the console and published (console matches repo as of Oct 28 — includes Route Board `buyers`/`routeStops`; Claude can publish them via Chrome by setting the CodeMirror editor).
-- How-to doc (current as of Oct 22: no PINs, load check, WTI review, scanning tips, Trucks & phones): https://claude.ai/code/artifact/475dd7ec-e6aa-433c-b4e6-467191b693a6 — edit it with the Claude Docs connector, not a publish
+- How-to doc (current as of Oct 22: no PINs, load check, WTI review, scanning tips, Trucks & phones; not yet: Navigate button, driver notes, Upload using the Route Board plan): https://claude.ai/code/artifact/475dd7ec-e6aa-433c-b4e6-467191b693a6 — edit it with the Claude Docs connector, not a publish
 
 ## How it works
 - Drivers: pick name from dropdown, tap a truck. No PINs. Phones sign in invisibly (Anonymous). Anyone with the link can see runs (accepted).
 - Office upload: a truck's MA Metrc manifest PDFs + Apex WTI PDFs together → review → Send to truck. One stop per customer; Fall River (MP281319, FR) and Lakeville (MC282112, LV) sets merge, boxes labelled FR/LV.
 - WTI check: every tag checked against the manifest; quantity check divides weight by unit size in the item name (multi-packs too).
 - Review page: "WTI check" column per package (✓ Match with WTI # and qty, or ✗ Off / Check with the reason), "X of Y match the WTI" per stop and overall, "Show only problems" toggle. Warnings include item names. The check isn't saved with the run.
+- Stop screen (v33): "🧭 Navigate" opens Google Maps directions (office-fixed pin if there is one, else the address); the buyer's driver note shows as a 📝 banner (and on the run list).
 - Load check at the dock (Done loading; office sees X of Y loaded). Delivery scans: Match / Wrong stop / Not on manifest / Already scanned. Offline scanning, syncs later, CSV export.
 - Office → Trucks & phones: Drivers (add/remove/add back; new names on an uploaded manifest are added as soon as the files are read, and the review page says who), Trucks (add/edit/remove, removed copies in `trucks/_removed`), Office admins (add/remove/change password).
 
-## Route Board (routes.html, v32, new)
+## Route Board (routes.html)
 - Office page for Brian, linked from the Office tabs ("Route Board"). Same admin sign-in; not a phone page.
 - Add invoices: Apex invoice PDFs (read by `parseManifestFile`, then `readInvoice` in routes.html for Buyer/Ship To/License/Invoice #/Delivery date), pasted email text, .eml, or by hand. Review before adding.
 - Week board: Unscheduled + Mon–Fri (Sat/Sun only if used); drag cards to days. A card dropped on a one-truck day joins that truck.
 - Day view: per-truck tabs, stop list with ▲▼, Suggest stop order (nearest + 2-opt, straight-line), Open in Google Maps (9 waypoints per link, splits into parts), Copy stop list, OpenStreetMap map via Leaflet (jsdelivr), drag a pin to fix a location.
 - Addresses are looked up with OpenStreetMap Nominatim (1/s, saved on the buyer; ", MA" added; falls back to the town).
 - Firestore (office-only rules): `buyers/{license}` { name, license, address, lat, lng, geo, notes (office), driverNote }, `buyers/_start` (where trucks leave from), `routeStops/{id}` { buyerKey, name, license, address, invoiceNo, day, truck, order }. Watches the last 90 days.
-- Next: (1) on Upload, sort a truck's stops by the plan (match license/invoice #, same day) and pre-pick the truck; (2) driver run screen "Navigate" button + driverNote on the run (runs are visible to anyone with the link, so office notes never go there); (3) tune `readInvoice` with a real Apex invoice.
+- Upload uses the plan (v33, `applyPlan` in admin.html): stops matched by WTI/invoice # (any day, leading zeros ignored), else license on the delivery date. Stops sorted by the plan's truck and order, unmatched last. The truck is pre-picked from the plan only if the manifest has none; if they differ, the review says so with a "Use W12" button. It also lists stops on another truck and planned stops missing from the files. Each stop gets the buyer's `driverNote` (editable on review) and the pin if fixed by hand (`lat`/`lng`); office `notes` never go on a run. `buyerKey` now lives in shared.js.
+- Next: tune `readInvoice` with a real Apex invoice. Maybe: mark the plan's stops as sent once the run goes out.
 
 ## Scanner (barcode-scanner.js)
 - Live camera: 1080p, continuous focus, tap the picture to focus there (3 s, then auto). Zoom button 1×–5× (whatever the phone allows), starts 2×, remembered.
@@ -36,11 +38,12 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Not testable here (no browser download); syntax-checked only. Goal from Brandon: a tag through plastic reads in 1–2 s (was 3–4 s).
 
 ## Publishing
-- Edit, bump `VERSION` in `sw.js` (now `manifest-check-v32`), push. Rule changes also go in the Firebase console.
+- Edit, bump `VERSION` in `sw.js` (now `manifest-check-v33`), push. Rule changes also go in the Firebase console.
 - Demo mode: apiKey starting with "PASTE" in `shared.js`.
 - Claude can't type passwords or create accounts.
 
 ## Waiting on Brandon
+- Test v33: plan a day on the Route Board (give a buyer a driver note), then upload that truck's manifests + WTIs: check stop order, truck, warnings, note. On a phone: Navigate opens Maps, the note shows.
 - Route Board (live, rules published Oct 28): set "Trucks leave from", add a real Apex invoice and share "Text read from the file" if anything is misread.
 - Confirm a non-admin account/phone loads trucks (hard refresh if it still shows "can't load trucks").
 - Upload a manifest with a new driver and check the name shows in the drivers' list.

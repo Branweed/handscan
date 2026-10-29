@@ -184,6 +184,20 @@ export function loadSummary(m, scans = [], localTags = null) {
   if (localTags) for (const t of localTags) if (byTag.has(t) && !loaded.has(t)) loaded.set(t, { tag: t });
   return { byTag, loaded, extras: [...extras.values()], total: byTag.size, done: (m.stopsDone || {})[LOAD] || null };
 }
+/* ---------------- Route Board ---------------- */
+// A buyer is remembered by license number (or by name when there isn't one), so notes carry over to every future invoice.
+export function buyerKey(license, name) {
+  const l = String(license || "").toUpperCase().replace(/[^A-Z0-9-]/g, "");
+  if (l) return l;
+  const n = String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return n ? "n-" + n : uid("b");
+}
+// Directions from where the phone is now: a pin the office fixed by hand wins, then the address.
+export function navUrl(s) {
+  const dest = typeof s.lat === "number" && typeof s.lng === "number" ? `${s.lat},${s.lng}` : String(s.address || "").trim();
+  return dest ? "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(dest) : "";
+}
+
 export const packageCount = m => (m.stops || []).reduce((n, s) => n + (s.packages || []).length, 0);
 export const stopIsDone = (m, id) => !!(m.stopsDone && m.stopsDone[id]);
 

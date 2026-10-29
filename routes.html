@@ -72,7 +72,7 @@ pre.raw{white-space:pre-wrap;font-size:12px;max-height:240px;overflow:auto;backg
 <main id="app"><div class="empty">Loading…</div></main>
 <dialog id="dlg"></dialog>
 <script type="module">
-import { h, swap, uid, friendlyError, ORIGINS } from "./shared.js";
+import { h, swap, uid, friendlyError, ORIGINS, buyerKey } from "./shared.js";
 import { createStore } from "./store.js";
 import * as P from "./manifest-parser.js";
 
@@ -118,12 +118,6 @@ const dayLong = s => fromIso(s).toLocaleDateString(undefined, { weekday: "long",
 
 /* ---------------- buyers and stops ---------------- */
 // A buyer is remembered by license number (or by name when there isn't one), so notes carry over to every future invoice.
-function buyerKey(license, name) {
-  const l = String(license || "").toUpperCase().replace(/[^A-Z0-9-]/g, "");
-  if (l) return l;
-  const n = String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
-  return n ? "n-" + n : uid("b");
-}
 const buyerOf = s => R.buyers[s.buyerKey] || {};
 const nameOf = s => buyerOf(s).name || s.name || "Unnamed buyer";
 const addrOf = s => buyerOf(s).address || s.address || "";
@@ -453,7 +447,7 @@ function editStop(id) {
     h("div", { class: "grid2" }, lab("Buyer", f.name), lab("License", f.license)),
     lab("Street address", f.address),
     h("div", { class: "grid2" }, lab("Invoice #", f.invoiceNo), lab("Delivery day (blank = unscheduled)", f.day)),
-    h("div", { class: "grid2" }, lab("Truck", f.truck), lab("Note for the driver", f.driverNote)),
+    h("div", { class: "grid2" }, lab("Truck", f.truck), lab("Note for the driver (shows on their phone)", f.driverNote)),
     lab("Office notes about this buyer (drivers never see these)", f.notes),
     truckList(), msg,
     h("div", { class: "btns" },

@@ -80,13 +80,13 @@ table.res th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-s
 <main id="app"><div class="empty">Loading…</div></main>
 <script type="module">
 import { DEMO, h, swap, uid, normalizeTag, looksLikeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, plural, downloadCsv,
-  friendlyError, manifestNos, runTitle, crewNames, firstName, vehicleInfo, adminEmail, stopSets, stopManifestNos, setText, multiOrigin, boxLabel, ORIGINS, mergeCrew, personKey, whoKey, LOAD, loadSummary, KNOWN_TRUCKS } from "./shared.js";
+  friendlyError, manifestNos, runTitle, crewNames, firstName, vehicleInfo, adminEmail, stopSets, stopManifestNos, setText, multiOrigin, boxLabel, ORIGINS, mergeCrew, personKey, whoKey, LOAD, loadSummary, KNOWN_TRUCKS, buyerKey } from "./shared.js";
 import { createStore } from "./store.js";
 
 const root = document.getElementById("app"), $ = id => document.getElementById(id);
 const A = { store: null, user: undefined, profile: undefined, tab: "upload", admins: [], manifests: [], draft: null, busy: "", error: "",
   openId: null, openScans: [], showArchived: false, showRaw: false, newAdmin: null, trucksDb: [], unsub: {},
-  tk: { code: "", nickname: "", plate: "" }, driverNames: undefined, trucksLoaded: false, seeded: false, nameDraft: "", newNames: [] };
+  tk: { code: "", nickname: "", plate: "" }, driverNames: undefined, trucksLoaded: false, seeded: false, nameDraft: "", newNames: [], buyers: {}, routeStops: [] };
 
 (async () => {
   try { A.store = await createStore("admin"); }
@@ -102,6 +102,9 @@ const A = { store: null, user: undefined, profile: undefined, tab: "upload", adm
         A.unsub.t = A.store.watchTrucks(l => { A.trucksDb = l.filter(t => !String(t.id || "").startsWith("_")); A.removedTrucks = ((l.find(t => t.id === "_removed") || {}).items) || {}; A.trucksLoaded = true; seedDriverNames(); render(); }, onErr);
         // these need the new Firestore rules; until they're published, the cards say so instead of showing an error
         const needRules = k => e => { console.warn(e); A[k] = "rules"; render(); };
+        // Route Board plan: used on Upload for stop order, truck and driver notes (optional, so errors are ignored)
+        A.unsub.b = A.store.watchBuyers(l => { A.buyers = Object.fromEntries(l.map(b => [b.id, b])); }, e => console.warn(e));
+        A.unsub.r = A.store.watchRouteStops(l => { A.routeStops = l; }, e => console.warn(e));
         A.unsub.n = A.store.watchDriverNames(n => { A.driverNames = n; seedDriverNames(); render(); }, needRules("driverNames"));
       }
       render();
@@ -196,12 +199,58 @@ async function readFiles(list, add = false) {
       for (const c of A.draft.crew) { const o = (prev.crew || []).find(x => (x.employeeId || x.name) === (c.employeeId || c.name)); if (o) c.include = o.include; }
     }
     if (!run.stops.length) A.draft.stops = blankDraft().stops;
+    else applyPlan(A.draft);
     A.draft.newNames = [...((prev && prev.newNames) || []), ...addNewNames(A.draft.crew)];
   } catch (e) {
     console.error(e);
     A.error = /fetch|import|module/i.test(String(e && e.message)) ? "Couldn't load the PDF reader. Check your internet connection." : "Couldn't read that file: " + (e.message || e);
   }
   A.busy = ""; A.showRaw = false; render();
+}
+
+// Route Board: put the stops in the planned order, pre-pick the planned truck, and bring each buyer's driver note and fixed pin along.
+// Matched by WTI/invoice # (any day), else by license on the same day. Office-only notes are never copied onto a run.
+function applyPlan(d) {
+  const norm = x => String(x || "").toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  const invs = s => [...stopSets(s).map(x => x.invoiceNo), s.invoiceNo].map(norm).filter(Boolean);
+  const plan = A.routeStops || [], hit = new Map();
+  for (const s of d.stops) {
+    const lk = s.license && buyerKey(s.license), mine = invs(s);
+    const c = plan.filter(r => mine.includes(norm(r.invoiceNo)));
+    const r = c.find(x => x.day === d.date) || c[0] || (lk && plan.find(x => x.day === d.date && (x.buyerKey === lk || buyerKey(x.license) === lk)));
+    if (r) hit.set(s.id, r);
+    const b = A.buyers[lk] || (r && A.buyers[r.buyerKey]) || {};
+    s.driverNote = b.driverNote || "";
+    if (b.geo === "manual" && typeof b.lat === "number" && typeof b.lng === "number") { s.lat = b.lat; s.lng = b.lng; }
+    if (!String(s.address || "").trim() && b.address) s.address = b.address;
+  }
+  d.plan = null;
+  if (!hit.size) return;
+  const most = a => { const n = {}; a.filter(Boolean).forEach(x => { n[x] = (n[x] || 0) + 1; }); return Object.keys(n).sort((x, y) => n[y] - n[x])[0] || ""; };
+  const rs = [...hit.values()], truck = most(rs.map(r => r.truck)), day = most(rs.map(r => r.day));
+  const rank = s => { const r = hit.get(s.id); return r ? [r.truck === truck ? 0 : 1, typeof r.order === "number" ? r.order : 999] : [2, 0]; };
+  d.stops = d.stops.map((s, i) => ({ s, i, k: rank(s) })).sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.i - b.i).map(x => x.s);
+  const fromManifest = String(d.truck || "").trim().toUpperCase();
+  if (truck && !fromManifest) d.truck = truck;
+  const used = new Set(rs.map(r => r.id));
+  d.plan = { truck, day, matched: hit.size, of: d.stops.length,
+    off: d.stops.filter(s => !hit.has(s.id)).map(s => s.name || "a stop"),
+    otherTruck: d.stops.filter(s => hit.has(s.id) && truck && hit.get(s.id).truck && hit.get(s.id).truck !== truck).map(s => `${s.name} (${hit.get(s.id).truck})`),
+    missing: truck ? plan.filter(r => r.day === day && r.truck === truck && !used.has(r.id)).map(r => r.name || "a stop") : [],
+    clash: truck && fromManifest && fromManifest !== truck.toUpperCase() ? fromManifest : "" };
+}
+function planNote(d) {
+  const p = d.plan; if (!p) return null;
+  const day = p.day ? fmtDate(p.day) : "";
+  return h("div", { class: "addmore", style: { display: "block" } },
+    h("div", { class: "oklist" }, `✓ Stops put in Route Board order${p.truck ? ` for ${p.truck}` : ""}${day ? `, ${day}` : ""} (${p.matched} of ${plural(p.of, "stop")} on the plan).`),
+    h("ul", { class: "warnlist" },
+      p.clash ? h("li", null, `The plan has these stops on ${p.truck}; the manifest says ${p.clash}. `,
+        h("button", { class: "small", onclick: () => { d.truck = p.truck; p.clash = ""; render(); } }, `Use ${p.truck}`)) : null,
+      p.day && d.date && p.day !== d.date ? h("li", null, `The plan has them on ${day}; the delivery date here is ${fmtDate(d.date)}.`) : null,
+      p.off.length ? h("li", null, `Not on the plan (put last): ${p.off.join(", ")}`) : null,
+      p.otherTruck.length ? h("li", null, `Planned on another truck: ${p.otherTruck.join(", ")}`) : null,
+      p.missing.length ? h("li", null, `Planned for ${p.truck} but not in these files: ${p.missing.join(", ")}`) : null));
 }
 
 function draftView() {
@@ -237,6 +286,7 @@ function draftView() {
       h("div", { class: "grid2", style: { marginTop: "12px" } },
         h("label", { class: "f" }, "Delivery date", h("input", { type: "date", "data-k": "d-date", value: d.date, oninput: set(d, "date") })),
 ),
+      planNote(d),
       d._results ? h("div", { class: "addmore" },
         h("div", { class: "meta" }, single.length
           ? `Only one set found for ${single.map(s => `${s.name} (${s.sets[0].origin})`).join(", ")}. If ${single.length > 1 ? "there are" : "there's"} more for ${single.length > 1 ? "them" : "it"}, add the other manifest and WTI.`
@@ -254,7 +304,8 @@ function draftView() {
         h("label", { class: "f" }, "License", h("input", { "data-k": `s-${s.id}-l`, value: s.license, oninput: set(s, "license") })),
         h("label", { class: "f" }, "Address", h("input", { "data-k": `s-${s.id}-a`, value: s.address, oninput: set(s, "address") })),
         s.sets && s.sets.length ? null : h("label", { class: "f" }, "Metrc manifest #", h("input", { "data-k": `s-${s.id}-m`, value: s.manifestNo || "", oninput: set(s, "manifestNo") })),
-        s.sets && s.sets.length ? null : h("label", { class: "f" }, "Invoice (WTI) #", h("input", { "data-k": `s-${s.id}-i`, value: s.invoiceNo || "", oninput: set(s, "invoiceNo") }))),
+        s.sets && s.sets.length ? null : h("label", { class: "f" }, "Invoice (WTI) #", h("input", { "data-k": `s-${s.id}-i`, value: s.invoiceNo || "", oninput: set(s, "invoiceNo") })),
+        h("label", { class: "f" }, "Note for the driver", h("input", { "data-k": `s-${s.id}-dn`, value: s.driverNote || "", oninput: set(s, "driverNote"), placeholder: "Shows on their phone" }))),
       s.sets && s.sets.length ? h("div", { class: "sets" }, s.sets.map(x => h("div", { class: "set" },
         x.originShort ? h("span", { class: "chip" }, x.originShort) : null, setText(x),
         x.invoiceNo ? null : h("span", { class: "chip warn", style: { marginLeft: "6px" } }, "no WTI")))) : null,
@@ -323,6 +374,8 @@ async function saveDraft() {
   const crew = (d.crew || []).filter(c => c.include);
   const stops = d.stops.map((s, i) => ({ id: s.id, name: s.name.trim() || `Stop ${i + 1}`, license: s.license.trim(), address: s.address.trim(),
     manifestNo: String(s.manifestNo || "").trim(), invoiceNo: String(s.invoiceNo || "").trim(),
+    ...(String(s.driverNote || "").trim() ? { driverNote: String(s.driverNote).trim() } : {}),
+    ...(typeof s.lat === "number" && typeof s.lng === "number" ? { lat: s.lat, lng: s.lng } : {}),
     ...(s.sets && s.sets.length ? { sets: s.sets.map(x => ({ manifestNo: x.manifestNo || "", invoiceNo: x.invoiceNo || "", origin: x.origin || "", originShort: x.originShort || "", originLicense: x.originLicense || "" })) } : {}),
     packages: s.packages.map(p => ({ tag: normalizeTag(p.tag), item: p.item.trim(), qty: String(p.qty).trim(), uom: p.uom.trim(), batch: p.batch.trim(), box: String(p.box || "").trim(),
       ...(p.origin ? { origin: p.origin, originShort: p.originShort || "" } : {}), ...(p.manifestNo ? { manifestNo: p.manifestNo } : {}) })).filter(p => p.tag) }))
@@ -412,6 +465,7 @@ function detailView(m) {
             : h("span", { class: "chip" }, `${p.matched.size}/${s.packages.length}`)),
         stopSets(s).map(x => h("div", { class: "meta" }, setText(x))),
         h("div", { class: "meta" }, [s.license, s.address].filter(Boolean).join(" · ")),
+        s.driverNote ? h("div", { class: "meta" }, `Note for the driver: ${s.driverNote}`) : null,
         p.matched.size ? h("button", { class: "small", style: { margin: "6px 0 2px" }, onclick: async e => {
           const btn = e.currentTarget, tags = s.packages.filter(pk => p.matched.has(pk.tag)).map(pk => pk.tag);
           try { await navigator.clipboard.writeText(tags.join("\n")); btn.textContent = `✓ Copied ${plural(tags.length, "tag")}`; }

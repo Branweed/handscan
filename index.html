@@ -35,7 +35,7 @@
 <main id="app"><div class="empty">Loading…</div></main>
 <script type="module">
 import { DEMO, h, swap, normalizeTag, fmtQty, fmtDate, fmtTime, summarize, tagNode, packageCount, stopIsDone, RESULT, plural, friendlyError,
-  runTitle, manifestNos, crewNames, firstName, stopSets, setText, multiOrigin, boxLabel, KNOWN_TRUCKS, mergeCrew, personKey, whoKey, LOAD, loadSummary } from "./shared.js";
+  runTitle, manifestNos, crewNames, firstName, stopSets, setText, multiOrigin, boxLabel, KNOWN_TRUCKS, mergeCrew, personKey, whoKey, LOAD, loadSummary, navUrl } from "./shared.js";
 import { createStore } from "./store.js";
 import { scanMany, signal } from "./barcode-scanner.js";
 
@@ -204,6 +204,7 @@ function manifestView() {
           h("div", { style: { flex: 1, minWidth: 0 } },
             h("div", { class: "rb" }, h("b", null, s.name), done ? h("span", { class: "chip ok" }, "Finished") : null),
             h("div", { class: "meta" }, s.address || s.license),
+            s.driverNote ? h("div", { class: "meta" }, `📝 ${s.driverNote}`) : null,
             stopSets(s).map(x => h("div", { class: "meta" }, setText(x))),
             h("div", { class: "meta" }, `${got} of ${n} scanned`, issues ? h("span", { class: "chip bad", style: { marginLeft: "8px" } }, plural(issues, "problem")) : null))),
         h("div", { class: "bar" }, h("i", { style: { width: `${n ? (got / n) * 100 : 0}%` } })));
@@ -239,6 +240,8 @@ function stopView(stop) {
       h("div", { style: { fontSize: "20px", fontWeight: 800 } }, stop.name),
       h("div", { class: "meta" }, [stop.address, stop.license].filter(Boolean).join(" · ")),
       stopSets(stop).map(x => h("div", { class: "meta" }, setText(x))),
+      stop.driverNote ? h("div", { class: "banner", style: { margin: "10px 0 0" } }, `📝 ${stop.driverNote}`) : null,
+      navUrl(stop) ? h("a", { class: "btn", href: navUrl(stop), target: "_blank", rel: "noopener", style: { marginTop: "10px" } }, "🧭  Navigate") : null,
       h("div", { class: "rb", style: { marginTop: "8px" } }, h("b", null, `${scanned.length} of ${stop.packages.length} scanned`), done ? h("span", { class: "chip ok" }, "Finished") : null),
       h("div", { class: "bar" }, h("i", { style: { width: `${stop.packages.length ? (scanned.length / stop.packages.length) * 100 : 0}%` } })),
       h("div", { style: { marginTop: "14px" } }, h("button", { class: "primary big", onclick: () => openCamera(stop) }, "📷  Scan packages")),
