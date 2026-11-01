@@ -62,10 +62,12 @@ Repo is public: no passwords, driver names or employee IDs here.
 
 ## Working style
 Batch requests, short replies, low usage, keep it simple for drivers.
+Naming (Brandon's request): the main Claude in the chat is Brancan; any helper/sub-agents are Brandawgs.
 
 ## For Claude: when to hand off
 Brandon wants long chats split up to save usage. Every chat on this project should:
 1. Start by reading this file instead of re-reading the whole repo. Open only the files the task needs.
+   Every handoff keeps the Brancan/Brandawgs naming line under Working style.
 2. After every push, update this file (version, what changed, what's waiting on Brandon) in the same commit or right after it.
 3. Keep a rough running count of tokens used in this chat (Claude doesn't get an exact number, so estimate):
    - about 4 characters = 1 token; a tool result or reply you can see counts at its length.
