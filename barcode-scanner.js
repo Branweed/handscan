@@ -438,12 +438,16 @@ export function scanBarcode(opts = {}) {
         if (fm.includes("continuous")) track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
       }, 3000);
     }
-    // Which way to look at the next frame. Whatever view last found a tag gets every other frame,
-    // so a driver who scans from far away gets the zoomed-in view twice as often.
+    // Which way to look at the next frame. Every other frame goes straight to the reader untouched
+    // (fastest, like the Pickup Board scanner). The frames in between alternate the view that last
+    // found a tag with the other views, so far tags and glare still get their extra help.
+    const FULL = MODES.indexOf("full");
     function nextMode() {
       tick++;
-      if (favor >= 0 && favor < MODES.length && tick % 2 === 0) return favor;
-      return (mode++) % MODES.length;
+      if (tick % 2 === 0) return FULL;
+      if (favor >= 0 && favor < MODES.length && favor !== FULL && tick % 4 === 1) return favor;
+      let m; do { m = (mode++) % MODES.length; } while (m === FULL);
+      return m;
     }
     async function toggleTorch() {
       const track = stream && stream.getVideoTracks()[0];

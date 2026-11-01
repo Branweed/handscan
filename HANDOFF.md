@@ -32,24 +32,26 @@ Repo is public: no passwords, driver names or employee IDs here.
 
 ## Scanner (barcode-scanner.js)
 - Live camera: 1080p, continuous focus, tap the picture to focus there (3 s, then auto). Zoom button 1×–5× (whatever the phone allows), starts 2×, remembered.
-- Each frame read one of 4 ways: center crop, "tight" (middle of the aim box enlarged ~2.4× for far tags), high-contrast crop (sleeve glare), full frame. The view that last read a tag gets every other frame and is remembered (`bcs-favor`); first-time default is high-contrast.
+- Formats (v35, `FORMATS` in index.html): Code 128, QR, Code 39 only (data_matrix and pdf417 dropped: they slow the phone's reader).
+- Views (v35): every other frame goes to the reader untouched (full frame, the fast Pickup Board way). Frames in between: the view that last read a tag (`bcs-favor`) every other time, else rotate center crop / "tight" (aim box enlarged ~2.4× for far tags) / high-contrast crop (glare).
 - Glare: if nothing reads for ~1.1 s, exposure switches between normal and -1 EV; whichever reads is kept and remembered (`bcs-expo`).
 - Timing (v31): 15 ms between frames, 0.45 s pause after a read, a tag just read is ignored for 2.5 s so the next tag reads straight away. Code 128/QR accept one read; retail/Code 39 need two. Tip after 6 s with no read.
 - 📷 Photo: reads every tag in one picture (full photo + 2×2 and 3×3 overlapping tiles + contrast pass on 2×2), numbered green/yellow/red boxes. 4–6 tags per photo, up to 8–10 in good conditions.
-- Not testable here (no browser download); syntax-checked only. Goal from Brandon: a tag through plastic reads in 1–2 s (was 3–4 s).
+- Not testable here; syntax-checked only. Goal: a tag through plastic in 1–2 s. Brandon timed v31 at ~3 s or more, depending on angle and focus; the Pickup Board scanner (visual-shopping-list `app.js`, plain `det.detect(video)` at 720p, 4 retail formats) felt much faster, so v35 borrows that. If still slow, next ideas: 720p instead of 1080p for the untouched frames, drop Code 39, skip the contrast pass on phones where `bcs-favor` is full.
 
 ## Publishing
-- Edit, bump `VERSION` in `sw.js` (now `manifest-check-v34`), push. Rule changes also go in the Firebase console.
+- Edit, bump `VERSION` in `sw.js` (now `manifest-check-v35`), push. Rule changes also go in the Firebase console.
 - Demo mode: apiKey starting with "PASTE" in `shared.js`.
 - Claude can't type passwords or create accounts.
 
-## Waiting on Brandon
-- Test v34 sent flag: send a run planned on the Route Board, check its cards show ✓ Sent; delete a test run and check the flag clears.
-- Test v33: plan a day on the Route Board (give a buyer a driver note), then upload that truck's manifests + WTIs: check stop order, truck, warnings, note. On a phone: Navigate opens Maps, the note shows.
-- Route Board (live, rules published Oct 28): set "Trucks leave from", add a real Apex invoice and share "Text read from the file" if anything is misread.
-- Confirm a non-admin account/phone loads trucks (hard refresh if it still shows "can't load trucks").
-- Upload a manifest with a new driver and check the name shows in the drivers' list.
-- Test v31 at work: time a tag through plastic (goal 1–2 s), far tags with 3–5× zoom, tap to focus, multi-tag photos, WTI review column. If the picture looks too dark, say so (glare exposure).
+## Next chat: do these, in order
+1. **Fix what Brandon found testing** (v33–v35 not tested at work yet). Ask for results first:
+   - v35 scanner: time a tag through plastic (goal 1–2 s; was ~3 s), far tags with 3–5× zoom, tap to focus, multi-tag photos. Does any tag type stop reading (QR, older Code 39)? Too dark (glare exposure)?
+   - v34 sent flag: send a run planned on the Route Board, check its cards show ✓ Sent; delete a test run and check the flag clears.
+   - v33: plan a day on the Route Board (give a buyer a driver note), upload that truck's manifests + WTIs: stop order, truck, warnings, note. On a phone: Navigate opens Maps, the note shows.
+   - Non-admin phone loads trucks (hard refresh if "can't load trucks"); a new driver on a manifest shows in the drivers' list; Route Board "Trucks leave from" set.
+2. **Tune `readInvoice` with a real Apex invoice.** Brandon is getting one from his laptop: a PDF attached to the chat, or the "Text read from the file" from the Route Board.
+3. **Update the how-to doc** (link above, Claude Docs connector): add the Navigate button, driver notes, the Route Board (planning the week, stop order, maps), Upload using the plan, the ✓ Sent flag, and v35 scanner tips. Keep it simple for drivers; office parts in their own section.
 
 ## Leftovers / later
 - Verify a real Lakeville set. Add RJ as an admin if not done. Check two drivers' employee IDs read from manifests.

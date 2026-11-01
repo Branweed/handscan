@@ -41,7 +41,8 @@ import { scanMany, signal } from "./barcode-scanner.js";
 
 const root = document.getElementById("app"), $ = id => document.getElementById(id);
 // Formats Metrc tags and company labels are printed in. QR codes are read even if they hold a URL around the tag.
-const FORMATS = ["code_128", "qr_code", "data_matrix", "code_39", "pdf417"];
+// Metrc tags are Code 128 (some also QR). Fewer types = the phone's reader works faster on each frame.
+const FORMATS = ["code_128", "qr_code", "code_39"];
 const S = { store: null, driver: undefined, trucks: [], driverNames: null, locked: false, me: null,
   pick: "", pickName: "", manifests: [], error: "",
   mid: null, manifest: undefined, scans: [], pending: 0, local: new Map(), last: null, code: "", unsub: {} };
