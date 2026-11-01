@@ -27,7 +27,8 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Addresses are looked up with OpenStreetMap Nominatim (1/s, saved on the buyer; ", MA" added; falls back to the town).
 - Firestore (office-only rules): `buyers/{license}` { name, license, address, lat, lng, geo, notes (office), driverNote }, `buyers/_start` (where trucks leave from), `routeStops/{id}` { buyerKey, name, license, address, invoiceNo, day, truck, order }. Watches the last 90 days.
 - Upload uses the plan (v33, `applyPlan` in admin.html): stops matched by WTI/invoice # (any day, leading zeros ignored), else license on the delivery date. Stops sorted by the plan's truck and order, unmatched last. The truck is pre-picked from the plan only if the manifest has none; if they differ, the review says so with a "Use W12" button. It also lists stops on another truck and planned stops missing from the files. Each stop gets the buyer's `driverNote` (editable on review) and the pin if fixed by hand (`lat`/`lng`); office `notes` never go on a run. `buyerKey` now lives in shared.js.
-- Next: tune `readInvoice` with a real Apex invoice. Maybe: mark the plan's stops as sent once the run goes out.
+- Sent flag (v34): Send to truck marks the matched `routeStops` with `sentRunId`, `sentTruck`, `sentDate`, `sentAt` (`markPlanSent`); deleting the run clears them (`clearPlanSent`). Route Board cards and day list show "✓ Sent on W99"; the edit dialog has "Mark not sent". Upload review warns "Already sent on a run" and leaves sent stops out of "planned but missing". No rule change.
+- Next: tune `readInvoice` with a real Apex invoice.
 
 ## Scanner (barcode-scanner.js)
 - Live camera: 1080p, continuous focus, tap the picture to focus there (3 s, then auto). Zoom button 1×–5× (whatever the phone allows), starts 2×, remembered.
@@ -38,11 +39,12 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Not testable here (no browser download); syntax-checked only. Goal from Brandon: a tag through plastic reads in 1–2 s (was 3–4 s).
 
 ## Publishing
-- Edit, bump `VERSION` in `sw.js` (now `manifest-check-v33`), push. Rule changes also go in the Firebase console.
+- Edit, bump `VERSION` in `sw.js` (now `manifest-check-v34`), push. Rule changes also go in the Firebase console.
 - Demo mode: apiKey starting with "PASTE" in `shared.js`.
 - Claude can't type passwords or create accounts.
 
 ## Waiting on Brandon
+- Test v34 sent flag: send a run planned on the Route Board, check its cards show ✓ Sent; delete a test run and check the flag clears.
 - Test v33: plan a day on the Route Board (give a buyer a driver note), then upload that truck's manifests + WTIs: check stop order, truck, warnings, note. On a phone: Navigate opens Maps, the note shows.
 - Route Board (live, rules published Oct 28): set "Trucks leave from", add a real Apex invoice and share "Text read from the file" if anything is misread.
 - Confirm a non-admin account/phone loads trucks (hard refresh if it still shows "can't load trucks").
