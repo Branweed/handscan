@@ -50,10 +50,10 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Not testable here: real camera speed, real PDFs, Firebase. No bugs found, so still v35.
 
 ## Solo plan (no Brandon needed; do this first, inline, no Brandawgs unless he asks)
-1. **Save the Brandawg team** as agent files in `.claude/agents/` (free until called): `brandawg-tester` (runs `tests/`, reports pass/fail, fixes only proven bugs), `brandawg-docs` (updates the how-to doc via the Claude Docs connector), `brandawg-scanner` (scanner tuning in barcode-scanner.js). Each file: its job, the files it may touch, "read HANDOFF.md first, low usage, Brancan reviews before anything is reported". Add a line here listing them.
-2. **One-command tests:** add `tests/run.sh` that makes the demo copy, serves it, runs every script and prints PASS/FAIL. Check it works.
-3. **Scanner A/B for work testing:** a hidden switch (e.g. `?scan=fast` in the URL, remembered) that reads untouched frames at 720p instead of 1080p. Default stays as v35. Check frame order with `tests/mode.js`; bump `VERSION`.
-4. **Invoice prep:** make sure the Route Board's "Text read from the file" has a Copy button so Brandon can paste it easily; add it if missing.
+The Brandawg agent team has its own hand-off: BRANDAWGS.md.
+1. **One-command tests:** add `tests/run.sh` that makes the demo copy, serves it, runs every script and prints PASS/FAIL. Check it works.
+2. **Scanner A/B for work testing:** a hidden switch (e.g. `?scan=fast` in the URL, remembered) that reads untouched frames at 720p instead of 1080p. Default stays as v35. Check frame order with `tests/mode.js`; bump `VERSION`.
+3. **Invoice prep:** make sure the Route Board's "Text read from the file" has a Copy button so Brandon can paste it easily; add it if missing.
 Push after each item, then update this file and hand off.
 
 ## Then, with Brandon, in order
