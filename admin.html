@@ -233,10 +233,11 @@ function applyPlan(d) {
   const fromManifest = String(d.truck || "").trim().toUpperCase();
   if (truck && !fromManifest) d.truck = truck;
   const used = new Set(rs.map(r => r.id));
-  d.plan = { truck, day, matched: hit.size, of: d.stops.length,
+  d.plan = { truck, day, matched: hit.size, of: d.stops.length, hits: Object.fromEntries([...hit].map(([k, r]) => [k, r.id])),
+    sent: rs.filter(r => r.sentRunId && A.manifests.some(m => m.id === r.sentRunId)).map(r => `${r.name || "a stop"} (${r.sentTruck || "a truck"})`),
     off: d.stops.filter(s => !hit.has(s.id)).map(s => s.name || "a stop"),
     otherTruck: d.stops.filter(s => hit.has(s.id) && truck && hit.get(s.id).truck && hit.get(s.id).truck !== truck).map(s => `${s.name} (${hit.get(s.id).truck})`),
-    missing: truck ? plan.filter(r => r.day === day && r.truck === truck && !used.has(r.id)).map(r => r.name || "a stop") : [],
+    missing: truck ? plan.filter(r => r.day === day && r.truck === truck && !used.has(r.id) && !(r.sentRunId && A.manifests.some(m => m.id === r.sentRunId))).map(r => r.name || "a stop") : [],
     clash: truck && fromManifest && fromManifest !== truck.toUpperCase() ? fromManifest : "" };
 }
 function planNote(d) {
@@ -248,6 +249,7 @@ function planNote(d) {
       p.clash ? h("li", null, `The plan has these stops on ${p.truck}; the manifest says ${p.clash}. `,
         h("button", { class: "small", onclick: () => { d.truck = p.truck; p.clash = ""; render(); } }, `Use ${p.truck}`)) : null,
       p.day && d.date && p.day !== d.date ? h("li", null, `The plan has them on ${day}; the delivery date here is ${fmtDate(d.date)}.`) : null,
+      p.sent.length ? h("li", null, `Already sent on a run: ${p.sent.join(", ")}`) : null,
       p.off.length ? h("li", null, `Not on the plan (put last): ${p.off.join(", ")}`) : null,
       p.otherTruck.length ? h("li", null, `Planned on another truck: ${p.otherTruck.join(", ")}`) : null,
       p.missing.length ? h("li", null, `Planned for ${p.truck} but not in these files: ${p.missing.join(", ")}`) : null));
@@ -397,9 +399,21 @@ async function saveDraft() {
     if (crew.length) addNewNames(crew);
     if (d.plate || d.nickname || crew.length) await A.store.saveTruck(truck, { plate: d.plate, nickname: d.nickname, crew: mergeCrew(crew).map(c => ({ name: c.name, employeeId: c.employeeId || "" })) });
     const id = await A.store.saveManifest(m);
+    await markPlanSent(d, stops, id, truck, m.date);
     A.draft = null; A.tab = "manifests"; openManifest(id);
   } catch (e) { A.error = friendlyError(e); }
   A.busy = ""; render();
+}
+
+// Route Board: flag the planned stops that went out on this run (a failure here never stops the send)
+async function markPlanSent(d, stops, runId, truck, date) {
+  const hits = (d.plan && d.plan.hits) || {}, at = Date.now();
+  const ids = [...new Set(stops.map(s => hits[s.id]).filter(Boolean))];
+  await Promise.all(ids.map(rid => A.store.updateRouteStop(rid, { sentRunId: runId, sentTruck: truck, sentDate: date, sentAt: at }).catch(e => console.warn(e))));
+}
+async function clearPlanSent(runId) {
+  await Promise.all((A.routeStops || []).filter(r => r.sentRunId === runId)
+    .map(r => A.store.updateRouteStop(r.id, { sentRunId: null, sentTruck: null, sentDate: null, sentAt: null }).catch(e => console.warn(e))));
 }
 
 /* ======================= runs + results ======================= */
@@ -453,7 +467,7 @@ function detailView(m) {
         m.status === "archived" ? "Unarchive" : "Archive"),
       h("button", { class: "small danger", onclick: async () => {
         if (!confirm(`Delete ${runTitle(m)} and all its scan results? This can't be undone.`)) return;
-        try { await A.store.deleteManifest(m.id); openManifest(null); } catch (err) { onErr(err); }
+        try { await A.store.deleteManifest(m.id); await clearPlanSent(m.id); openManifest(null); } catch (err) { onErr(err); }
       } }, "Delete")),
     (m.stops || []).map((s, i) => {
       const p = sum.per[s.id], fin = m.stopsDone && m.stopsDone[s.id];

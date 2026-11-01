@@ -72,7 +72,7 @@ pre.raw{white-space:pre-wrap;font-size:12px;max-height:240px;overflow:auto;backg
 <main id="app"><div class="empty">Loading…</div></main>
 <dialog id="dlg"></dialog>
 <script type="module">
-import { h, swap, uid, friendlyError, ORIGINS, buyerKey } from "./shared.js";
+import { h, swap, uid, friendlyError, ORIGINS, buyerKey, fmtDate } from "./shared.js";
 import { createStore } from "./store.js";
 import * as P from "./manifest-parser.js";
 
@@ -136,6 +136,7 @@ const dayStops = d => R.stops.filter(s => s.day === d);
 const truckStops = (d, t) => dayStops(d).filter(s => (s.truck || "") === t).sort(byOrder);
 const nextOrder = (day, truck) => (day ? truckStops(day, truck).reduce((m, x) => Math.max(m, x.order ?? 0), -1) + 1 : 0);
 const chip = (t, cls = "") => h("span", { class: "chip " + cls, title: t }, t);
+const sentChip = s => s.sentRunId ? chip(`✓ Sent${s.sentTruck ? " on " + s.sentTruck : ""}`, "ok") : null;
 function placeChip(s) {
   const b = buyerOf(s);
   if (!addrOf(s)) return chip("Needs an address", "bad");
@@ -204,7 +205,7 @@ function card(s) {
       onkeydown: e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); editStop(s.id); } } },
     h("b", null, nameOf(s)),
     h("span", { class: "meta" }, [cityOf(addrOf(s)), s.invoiceNo ? "Invoice " + s.invoiceNo : ""].filter(Boolean).join(" · ")),
-    h("span", { class: "chips" }, s.truck ? chip(s.truck) : null, note ? h("span", { class: "chip note", title: note }, clip(note, 28)) : null, placeChip(s)));
+    h("span", { class: "chips" }, sentChip(s), s.truck ? chip(s.truck) : null, note ? h("span", { class: "chip note", title: note }, clip(note, 28)) : null, placeChip(s)));
   return el;
 }
 async function moveTo(id, day) {
@@ -268,7 +269,7 @@ function stopRow(s, i, list) {
     h("span", { class: "n" }, String(i + 1)),
     h("div", { class: "txt", onclick: () => editStop(s.id), title: "Click to edit" },
       h("b", null, nameOf(s)), h("div", { class: "meta" }, addrOf(s) || "No address yet"),
-      h("div", { class: "chips" }, s.invoiceNo ? chip("Invoice " + s.invoiceNo) : null, note ? h("span", { class: "chip note" }, note) : null, placeChip(s))),
+      h("div", { class: "chips" }, sentChip(s), s.invoiceNo ? chip("Invoice " + s.invoiceNo) : null, note ? h("span", { class: "chip note" }, note) : null, placeChip(s))),
     h("div", { class: "updn" },
       h("button", { class: "small", "aria-label": "Move up", disabled: i === 0, onclick: () => reorder(list, i, i - 1) }, "▲"),
       h("button", { class: "small", "aria-label": "Move down", disabled: i === list.length - 1, onclick: () => reorder(list, i, i + 1) }, "▼")));
@@ -444,6 +445,10 @@ function editStop(id) {
       catch (err) { msg.textContent = friendlyError(err); }
     } },
     h("h2", { class: "title" }, nameOf(s)),
+    s.sentRunId ? h("div", { class: "meta" }, `✓ Sent to ${s.sentTruck || "a truck"}${s.sentDate ? " for " + fmtDate(s.sentDate) : ""}. `,
+      h("button", { type: "button", class: "small", onclick: async () => {
+        try { await R.store.updateRouteStop(id, { sentRunId: null, sentTruck: null, sentDate: null, sentAt: null }); closeDialog(); } catch (err) { msg.textContent = friendlyError(err); }
+      } }, "Mark not sent")) : null,
     h("div", { class: "grid2" }, lab("Buyer", f.name), lab("License", f.license)),
     lab("Street address", f.address),
     h("div", { class: "grid2" }, lab("Invoice #", f.invoiceNo), lab("Delivery day (blank = unscheduled)", f.day)),
