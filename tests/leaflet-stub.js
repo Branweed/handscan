@@ -1,0 +1,1 @@
+(function(){const f=function(){return p};const p=new Proxy(f,{get:(t,k)=>k==='then'?undefined:(k==='getBounds'||k==='getLatLng')?()=>({lat:41,lng:-71,isValid:()=>true,pad:()=>p}):p,apply:()=>p});window.L=p;})();

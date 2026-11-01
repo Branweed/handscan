@@ -49,7 +49,14 @@ Repo is public: no passwords, driver names or employee IDs here.
 - v35 `nextMode`: every even frame is full; crop/tight/boost all get turns, favor = full handled. Offline: the app shell and a run load from the service worker in offline mode.
 - Not testable here: real camera speed, real PDFs, Firebase. No bugs found, so still v35.
 
-## Next chat: do these, in order
+## Solo plan (no Brandon needed; do this first, inline, no Brandawgs unless he asks)
+1. **Save the Brandawg team** as agent files in `.claude/agents/` (free until called): `brandawg-tester` (runs `tests/`, reports pass/fail, fixes only proven bugs), `brandawg-docs` (updates the how-to doc via the Claude Docs connector), `brandawg-scanner` (scanner tuning in barcode-scanner.js). Each file: its job, the files it may touch, "read HANDOFF.md first, low usage, Brancan reviews before anything is reported". Add a line here listing them.
+2. **One-command tests:** add `tests/run.sh` that makes the demo copy, serves it, runs every script and prints PASS/FAIL. Check it works.
+3. **Scanner A/B for work testing:** a hidden switch (e.g. `?scan=fast` in the URL, remembered) that reads untouched frames at 720p instead of 1080p. Default stays as v35. Check frame order with `tests/mode.js`; bump `VERSION`.
+4. **Invoice prep:** make sure the Route Board's "Text read from the file" has a Copy button so Brandon can paste it easily; add it if missing.
+Push after each item, then update this file and hand off.
+
+## Then, with Brandon, in order
 1. **Fix what Brandon found testing** (v33–v35 passed a demo test, not tested at work yet). Ask for results first:
    - v35 scanner: time a tag through plastic (goal 1–2 s; was ~3 s), far tags with 3–5× zoom, tap to focus, multi-tag photos. Does any tag type stop reading (QR, older Code 39)? Too dark (glare exposure)?
    - v34 sent flag: send a run planned on the Route Board, check its cards show ✓ Sent; delete a test run and check the flag clears.

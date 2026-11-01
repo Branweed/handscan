@@ -1,0 +1,11 @@
+const {chromium}=require('playwright');const C=require('./common');const KEY="manifest-check-demo:v4";
+(async()=>{const b=await chromium.launch();const ctx=await b.newContext();const log=[];await C.wire(ctx,log);
+const r=await ctx.newPage();C.watch(r,'routes',log);await r.goto(C.BASE+'routes.html');await r.waitForTimeout(1500);
+await r.evaluate(async()=>{const S=await import('./store.js');await S.createStore('admin').updateRouteStop('demo-r0',{sentRunId:'x1',sentTruck:'T1',sentDate:'2026-10-27',sentAt:1});});
+await r.reload();await r.waitForTimeout(1500);
+console.log('chips:',await r.locator('text=/✓ Sent/').allInnerTexts());
+await r.locator('text=/✓ Sent/').first().click();await r.waitForTimeout(800);
+const mb=r.locator('button:has-text("Mark not sent")');console.log('Mark not sent visible:',await mb.isVisible());
+await mb.click();await r.waitForTimeout(800);
+console.log('chips after:',await r.locator('text=/✓ Sent/').allInnerTexts(),'stored:',await r.evaluate(k=>JSON.parse(localStorage.getItem(k)).routes.stops['demo-r0'].sentRunId,KEY));
+console.log(log.join('\n'));await b.close();})();
