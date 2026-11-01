@@ -8,7 +8,7 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Office: https://branweed.github.io/handscan/admin.html (on a phone it opens only from the Office / Admin button)
 - Code: github.com/Branweed/handscan, GitHub Pages from `main`. A new session may need `add_repo` (push access) first. A claude.ai chat without push access clones the public repo and hands back the changed files (zip) for Brandon to upload on GitHub.
 - Firebase project `handscan-72136` (free Spark): Email/Password + Anonymous sign-in, Firestore. Rules come from `firestore.rules` and must be pasted into the console and published (console matches repo as of Oct 28 — includes Route Board `buyers`/`routeStops`; Claude can publish them via Chrome by setting the CodeMirror editor).
-- How-to doc (current as of Oct 22: no PINs, load check, WTI review, scanning tips, Trucks & phones; not yet: Navigate button, driver notes, Upload using the Route Board plan): https://claude.ai/code/artifact/475dd7ec-e6aa-433c-b4e6-467191b693a6 — edit it with the Claude Docs connector, not a publish
+- How-to doc (current as of Nov 1: adds Navigate, driver notes, Route Board office section, Upload using the plan, ✓ Sent / Mark not sent, offline + glare scanning tips): https://claude.ai/code/artifact/475dd7ec-e6aa-433c-b4e6-467191b693a6 — edit it with the Claude Docs connector, not a publish
 
 ## How it works
 - Drivers: pick name from dropdown, tap a truck. No PINs. Phones sign in invisibly (Anonymous). Anyone with the link can see runs (accepted).
@@ -44,14 +44,18 @@ Repo is public: no passwords, driver names or employee IDs here.
 - Demo mode: apiKey starting with "PASTE" in `shared.js`.
 - Claude can't type passwords or create accounts.
 
+## Tested by Claude (Nov 1, demo mode, headless Chromium)
+- index/admin/routes load with no console errors. v34 passed end to end: CSV upload matched the plan (order, truck, driver note, "not on plan", "planned but missing"), Send set `sentRunId/sentTruck/sentDate`, Route Board showed "✓ Sent on T1", a second upload warned "Already sent", run delete and "Mark not sent" cleared it. `applyPlan` invoice match (leading zeros, other day) checked in node.
+- v35 `nextMode`: every even frame is full; crop/tight/boost all get turns, favor = full handled. Offline: the app shell and a run load from the service worker in offline mode.
+- Not testable here: real camera speed, real PDFs, Firebase. No bugs found, so still v35.
+
 ## Next chat: do these, in order
-1. **Fix what Brandon found testing** (v33–v35 not tested at work yet). Ask for results first:
+1. **Fix what Brandon found testing** (v33–v35 passed a demo test, not tested at work yet). Ask for results first:
    - v35 scanner: time a tag through plastic (goal 1–2 s; was ~3 s), far tags with 3–5× zoom, tap to focus, multi-tag photos. Does any tag type stop reading (QR, older Code 39)? Too dark (glare exposure)?
    - v34 sent flag: send a run planned on the Route Board, check its cards show ✓ Sent; delete a test run and check the flag clears.
    - v33: plan a day on the Route Board (give a buyer a driver note), upload that truck's manifests + WTIs: stop order, truck, warnings, note. On a phone: Navigate opens Maps, the note shows.
    - Non-admin phone loads trucks (hard refresh if "can't load trucks"); a new driver on a manifest shows in the drivers' list; Route Board "Trucks leave from" set.
 2. **Tune `readInvoice` with a real Apex invoice.** Brandon is getting one from his laptop: a PDF attached to the chat, or the "Text read from the file" from the Route Board.
-3. **Update the how-to doc** (link above, Claude Docs connector): add the Navigate button, driver notes, the Route Board (planning the week, stop order, maps), Upload using the plan, the ✓ Sent flag, and v35 scanner tips. Keep it simple for drivers; office parts in their own section.
 
 ## Leftovers / later
 - Verify a real Lakeville set. Add RJ as an admin if not done. Check two drivers' employee IDs read from manifests.
