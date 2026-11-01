@@ -49,8 +49,7 @@ Repo is public: no passwords, driver names or employee IDs here.
 - v35 `nextMode`: every even frame is full; crop/tight/boost all get turns, favor = full handled. Offline: the app shell and a run load from the service worker in offline mode.
 - Not testable here: real camera speed, real PDFs, Firebase. No bugs found, so still v35.
 
-## Solo plan (no Brandon needed; do this first, inline, no Brandawgs unless he asks)
-The Brandawg agent team has its own hand-off: BRANDAWGS.md.
+## Solo plan (no Brandon needed; do this first)
 1. **One-command tests:** add `tests/run.sh` that makes the demo copy, serves it, runs every script and prints PASS/FAIL. Check it works.
 2. **Scanner A/B for work testing:** a hidden switch (e.g. `?scan=fast` in the URL, remembered) that reads untouched frames at 720p instead of 1080p. Default stays as v35. Check frame order with `tests/mode.js`; bump `VERSION`.
 3. **Invoice prep:** make sure the Route Board's "Text read from the file" has a Copy button so Brandon can paste it easily; add it if missing.
@@ -69,12 +68,10 @@ Push after each item, then update this file and hand off.
 
 ## Working style
 Batch requests, short replies, low usage, keep it simple for drivers.
-Naming (Brandon's request): the main Claude in the chat is Brancan; any helper/sub-agents are Brandawgs.
 
 ## For Claude: when to hand off
 Brandon wants long chats split up to save usage. Every chat on this project should:
 1. Start by reading this file instead of re-reading the whole repo. Open only the files the task needs.
-   Every handoff keeps the Brancan/Brandawgs naming line under Working style.
 2. After every push, update this file (version, what changed, what's waiting on Brandon) in the same commit or right after it.
 3. Keep a rough running count of tokens used in this chat (Claude doesn't get an exact number, so estimate):
    - about 4 characters = 1 token; a tool result or reply you can see counts at its length.
